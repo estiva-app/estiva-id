@@ -8,70 +8,160 @@ made, and what remains to implement — followed by the smaller things still ope
 
 ## DECIDED · Domain layout and `nip05` (PEEK-33)
 
-**Decision: serve `/.well-known/nostr.json` from Estiva ID, exposed at the
-community domain by routing that single path to it.**
+**Decision: the relay serves `/.well-known/nostr.json`. Estiva ID stays
+authoritative by being the sole publisher of `kind:0` — the handle rides in the
+profile event.**
+
+> **This reverses an earlier decision, deliberately.** The first answer was that
+> Estiva ID would serve `nostr.json` itself, exposed at the community domain by
+> routing that one path to it. That reasoning was sound for a **single**
+> workspace and wrong for many. The reversal is recorded rather than quietly
+> applied, because the original argument still holds in the case it was made for.
 
 ### The constraint
 
-A `nip05` handle is a name that maps to a pubkey — `jan@estiva.app` rather than
-`714902a6…`. It resolves by fetching
+A `nip05` handle maps a name to a pubkey — `jan@abc.estiva.app` rather than
+`714902a6…` — resolved by fetching
 `https://<domain>/.well-known/nostr.json?name=jan`. There is no registry:
 **whoever controls the domain controls what the handle means.** That is why the
-handle is the org's *attestation* — the badge saying this pubkey is our person —
-and why revoking it is deleting a line from a file.
+handle is the org's *attestation*, and why revoking it is deleting a line from a
+file.
 
-Buzz requires the handle's domain to match the **community's** domain.
-Off-domain or invalid handles are *silently cleared*
-(`BUZZ_PROTOCOL_MODEL.md:235`) — they do not error, they vanish, which is a
-miserable thing to debug.
+Three facts from the relay source pin this down harder than the issue suggests:
 
-That splits knowing from serving: Estiva ID holds the handles; the community
-domain must answer for them.
+1. **`communities.host` is one hostname per community**, resolved per request
+   from the `Host` header (`crates/buzz-relay/src/tenant.rs`). The same binding
+   governs WebSocket connections, the bridge API *and* `nostr.json`.
+2. **`extract_domain()` does not strip subdomains** — it removes only scheme,
+   port and path, so `abc.estiva.app` stays `abc.estiva.app`
+   (`crates/buzz-relay/src/api/nip05.rs`).
+3. **`canonicalize_nip05()` requires the handle's domain to equal the tenant host
+   exactly**, and runs during profile sync (`handlers/side_effects.rs`).
 
-### Why this option
+Together: **the domain inside a handle is welded to the hostname the relay
+answers on.** Serving `nostr.json` elsewhere does not change what the handle
+must say.
 
-The alternative — the relay serving `nostr.json`, fed from here — makes
-revocation a *distributed* operation. Estiva ID deletes a handle and the relay
-keeps serving it until something syncs, leaving a window where a leaver's badge
-still resolves. That trades away the one property most worth protecting.
+### Why the relay, and not this service
 
-Routing a single path keeps revocation **local and immediate**: delete the row,
-the next request reflects it. One system owns the badge end to end, matching the
-key / admission / attestation split. And it does not consume the apex, so the
-marketing site keeps it.
+Because workspaces are per-customer. Each company gets its own community host —
+`abc.estiva.app` now, `chat.acme.com` when custom domains arrive — and handles
+follow it. That means `nostr.json` has to answer at **every customer's domain**.
 
-### What this requires operationally
+For Estiva ID to serve it, this service would have to be reachable on all of
+those hostnames and implement its own `Host` → workspace binding: the
+fail-closed lookup, the "never reveal which communities exist on this
+deployment" behaviour, all of it. Buzz already has that, with a formal isolation
+spec behind it (`docs/multi-tenant-relay.md`), and its `nostr.json` endpoint
+already sets `Access-Control-Allow-Origin: *`.
 
-**One reverse-proxy rule, outside this repo**, at the community domain:
+Reimplementing a verified tenant seam to own a file is the wrong trade. Estiva
+ID keeps authority where it belongs — as the only publisher of `kind:0`.
 
-```
-/.well-known/nostr.json  →  <estiva-id origin>/.well-known/nostr.json
-```
+### The revocation question this reopens, and a trap to verify
 
-A Vercel rewrite, a Cloudflare rule, or an nginx `location` block — whatever
-fronts the apex. Everything else at that domain is unaffected.
+Serving from the relay means revoking a handle is a *publish*, not a local
+delete: Estiva ID republishes the person's `kind:0`, the relay syncs it.
 
-**This is the fragile part of the decision.** It is infrastructure config that
-lives in no repository, so it is invisible until handles quietly stop resolving.
-Whoever sets it up should record where it lives. Treat it as part of the
-deployment, not as a one-off.
+**Do not assume omitting the field revokes it.** In `buzz-db/src/user.rs` the
+update only touches `nip05_handle` when a value is present, so a `kind:0` with
+no `nip05` appears to leave the previous handle in place; clearing looks like it
+needs an explicitly empty value. Similarly, a handle that fails canonicalisation
+is *not applied* rather than clearing what is already there — which is a weaker
+guarantee than "silently cleared" implies.
+
+**Verify this against a running relay before offboarding depends on it.** It is
+the difference between a leaver losing their badge and keeping it.
 
 ### Still to implement
 
-* `GET /.well-known/nostr.json?name=<handle>` in this service.
-* A handles table, unique per handle, revocable independently of the account —
-  offboarding revokes the handle without deleting the identity.
-* CORS: `Access-Control-Allow-Origin: *`. NIP-05 lookups are cross-origin by
-  nature and fail silently without it.
-* `NIP05_DOMAIN` config, which **must equal** Buzz's configured community
-  domain. A mismatch is the silent-clearing failure above.
+* Publishing `kind:0` with the handle (PEEK-31), which is what makes any of this
+  reach the relay.
+* A handles table keyed by **`(person, workspace)`**, not by person — see the
+  multi-workspace note below.
+* Confirm the revocation semantics above, with a test against a real relay.
+* `communities.host` seeded per workspace (PEEK-59).
 
 ### Consequence to act on now
 
-`RP_ID` and `ISSUER_URL` follow from this. Passkeys are cryptographically bound
-to a domain: one enrolled against `id.estiva.app` **will not work** at
-`estiva.app`, with no migration path — everyone re-enrols. Settle the final
-hostnames before anyone real enrols, and set `RP_ID` once.
+Authentication is **centralised**, and does not follow the workspace domain.
+Everyone signs in at one origin regardless of which workspaces they belong to,
+which is what keeps "one human, one pubkey" true for a contractor working with
+two client companies.
+
+Planned hostnames:
+
+| Hostname | What |
+| --- | --- |
+| `estiva.app` | Marketing only. No app traffic, no relay traffic. |
+| `id.estiva.app` | Estiva ID. `ISSUER_URL=https://id.estiva.app` |
+| `abc.estiva.app` | A customer workspace: their relay, their community host, their handles (`jan@abc.estiva.app`) |
+| `chat.acme.com` | The same, once customers can bring their own domain |
+
+**Set `RP_ID=estiva.app`, not `id.estiva.app`.** WebAuthn permits the RP ID to be
+a registrable-domain suffix of the origin, so a service at `id.estiva.app` may
+claim `estiva.app`. That way passkeys survive the service ever moving to another
+subdomain; pinning the narrower value means every credential dies on such a move,
+with no migration path.
+
+This does not loosen anything, because the two settings do different jobs:
+`RP_ID` decides which credentials an authenticator will *offer*, while
+`RP_ORIGINS` decides which origins this service will *accept an assertion from*.
+Keep `RP_ORIGINS` to exactly `https://id.estiva.app` and a compromised sibling
+subdomain cannot use those passkeys — the origin inside `clientDataJSON` will not
+match. **The residual cost is that this holds only while that allowlist stays
+tight.** Do not widen it casually.
+
+---
+
+## Multi-workspace: shared now, dedicated deployments later
+
+Recorded here because it constrains work that has not started, and because the
+Stage 1 plan originally assumed a single workspace throughout.
+
+**The goal:** one shared deployment now, so small companies can be onboarded
+quickly to try Estiva; **dedicated per-workspace deployments** as the long-term
+enterprise story.
+
+### The invariant that keeps "dedicated later" cheap
+
+**A person's pubkey must not change when their workspace is split out.** If it
+does, every message and issue they ever wrote stays on the relay signed by a key
+that is no longer theirs, and their history detaches from them — the same class
+of unrecoverable failure the Stage 2 key migration guards against.
+
+The custody format already supports this, without change. Because each secret is
+encrypted under its own random DEK and only the DEK is wrapped per deployment,
+extracting a customer is: add a wrap under the new deployment's KEK, ship the
+envelope rows, drop the old wrap. **No user secret is re-encrypted and no pubkey
+changes.** The mechanism built for escrow turns out to serve tenant extraction
+too — see [KEY-CUSTODY.md](KEY-CUSTODY.md).
+
+### What a split does change, unavoidably
+
+The **issuer URL**. Tokens name their issuer and apps trust an issuer, so a
+customer moving to their own deployment means repointing their apps at a new
+issuer and JWKS, ending every live session at that moment. Planned maintenance,
+not a background migration. Fine — as long as nobody promises otherwise.
+
+### What the schema already gets right
+
+Under "one human, one pubkey", a contractor at two client companies is **one row
+here**, not two:
+
+* `users.email` globally unique — correct.
+* One active key per user — correct, same reason.
+* `workspaces` and `workspace_members` are an ordinary later migration.
+
+### The one thing that would be wrong if built carelessly
+
+**A handle belongs to a `(person, workspace)` pair, not to a person.** Jan may be
+`jan@abc.estiva.app` in one workspace and `jan@chat.acme.com` in another, with
+the same pubkey. A single `nip05_handle` column on `users` is the shape that has
+to be undone later.
+
+This matches Buzz's own rule that profiles do not inherit across community
+domains — a pubkey in two communities reposts its profile in each.
 
 ---
 

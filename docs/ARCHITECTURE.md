@@ -194,13 +194,18 @@ The two design questions that were held open — the domain layout for `nip05`
 (PEEK-33) and who drives community admission (PEEK-36) — were **decided on
 2026-08-04**, after this service was built and without changing any of it. The
 decisions, the reasoning and what remains to implement are in
-[OPEN-SEAMS.md](OPEN-SEAMS.md). In short: Estiva ID serves `nostr.json` with a
-single routed path at the community domain, so revocation stays local; and it
-observes admission rather than driving it, so a half-offboarded person is
-visible rather than silent.
+[OPEN-SEAMS.md](OPEN-SEAMS.md). In short: the relay serves `nostr.json` per
+workspace while Estiva ID stays authoritative as the sole publisher of `kind:0`;
+and Estiva ID observes admission rather than driving it, so a half-offboarded
+person is visible rather than silent.
 
-**Multi-community is out of scope and recorded so it is not rediscovered:** Buzz
-is explicit that profiles do not inherit across community domains
-(`BUZZ_PROTOCOL_MODEL.md:350`) — a pubkey in two communities must repost its
-profile in each. This design assumes one workspace throughout. If a contractor
-is ever in two, Estiva ID becomes per-community or republishes per community.
+**Multi-workspace is the product goal, and Stage 1 is single-workspace only.**
+Each customer gets their own community host and therefore their own handle
+domain (`jan@abc.estiva.app`); Buzz is built for this, resolving the community
+per request from the `Host` header. Authentication stays centralised at one
+origin, so a contractor at two client companies remains one person with one
+pubkey — though Buzz is explicit that profiles do not inherit across community
+domains (`BUZZ_PROTOCOL_MODEL.md:350`), so that pubkey reposts its profile in
+each. Shared deployment now, dedicated per-workspace deployments later; the
+invariant that keeps the second cheap is that **a pubkey must survive the
+split**. See [OPEN-SEAMS.md](OPEN-SEAMS.md).

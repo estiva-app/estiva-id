@@ -103,6 +103,21 @@ without re-encrypting anything.
 * `keyCustodyReport()` reports which kids currently hold custody, without
   exposing key material — the query to run before and after a rotation.
 
+## Extracting a customer to their own deployment
+
+The long-term product goal is dedicated per-workspace deployments (see
+[OPEN-SEAMS.md](OPEN-SEAMS.md)). The same two-layer split makes that a data move
+rather than a re-encryption:
+
+1. Add a wrap under the new deployment's KEK to each affected envelope.
+2. Ship the rows across.
+3. Drop the old wrap.
+
+**No user secret is re-encrypted, and no pubkey changes** — which is the
+invariant that matters, because a changed pubkey detaches a person from
+everything they ever signed. The mechanism designed for escrow serves tenant
+extraction unmodified.
+
 ## Rotating the KEK (not yet implemented)
 
 The format supports it; the procedure does not exist yet. It would be: add a
