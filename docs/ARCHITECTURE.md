@@ -8,7 +8,7 @@ Companion documents:
 | If you want to… | Read |
 | --- | --- |
 | Understand the at-rest key format | [KEY-CUSTODY.md](KEY-CUSTODY.md) |
-| Know what is deliberately undecided | [OPEN-SEAMS.md](OPEN-SEAMS.md) |
+| Know what was decided about domains and admission | [OPEN-SEAMS.md](OPEN-SEAMS.md) |
 | Call the service | [API.md](API.md) |
 
 ---
@@ -190,8 +190,14 @@ Admin UI, profile editing, the `kind:0` publisher, the private directory,
 Blossom avatars, invites and offboarding, role and service identities, real
 `nostr.json` serving, any call to Buzz's admission API, and recovery flows.
 
-Two design questions are open and must not be baked in — see
-[OPEN-SEAMS.md](OPEN-SEAMS.md).
+The two design questions that were held open — the domain layout for `nip05`
+(PEEK-33) and who drives community admission (PEEK-36) — were **decided on
+2026-08-04**, after this service was built and without changing any of it. The
+decisions, the reasoning and what remains to implement are in
+[OPEN-SEAMS.md](OPEN-SEAMS.md). In short: Estiva ID serves `nostr.json` with a
+single routed path at the community domain, so revocation stays local; and it
+observes admission rather than driving it, so a half-offboarded person is
+visible rather than silent.
 
 **Multi-community is out of scope and recorded so it is not rediscovered:** Buzz
 is explicit that profiles do not inherit across community domains

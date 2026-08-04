@@ -17,7 +17,7 @@ keys out of custody. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.
 | If you want to… | Read |
 | --- | --- |
 | **Understand the design without re-deriving it** | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** |
-| Know what is deliberately undecided | [docs/OPEN-SEAMS.md](docs/OPEN-SEAMS.md) |
+| Know what was decided about domains and admission | [docs/OPEN-SEAMS.md](docs/OPEN-SEAMS.md) |
 | Understand the at-rest key format | [docs/KEY-CUSTODY.md](docs/KEY-CUSTODY.md) |
 | Call the service | [docs/API.md](docs/API.md) |
 
