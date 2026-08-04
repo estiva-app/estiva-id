@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: estiva
+      POSTGRES_PASSWORD: estiva
+      POSTGRES_DB: estiva_id
+    ports:
+      - '5433:5432'
+    volumes:
+      - estiva-id-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U estiva -d estiva_id']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  estiva-id-pgdata:

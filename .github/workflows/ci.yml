@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: estiva
+          POSTGRES_PASSWORD: estiva
+          POSTGRES_DB: estiva_id
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U estiva -d estiva_id"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://estiva:estiva@localhost:5433/estiva_id
+      ISSUER_URL: http://localhost:8787
+      RP_ID: localhost
+      RP_ORIGINS: http://localhost:8787
+      KEY_ENCRYPTION_KEK: 1111111111111111111111111111111111111111111111111111111111111111
+      KEY_ENCRYPTION_KID: ci-1
+      SIGN_NIP98_ALLOWED_URL_PREFIXES: http://relay.test/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint and format check
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm build
+
+      - name: Run migrations
+        run: pnpm migrate
+
+      - name: Test
+        run: pnpm test

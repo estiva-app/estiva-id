@@ -1,0 +1,5 @@
+# pnpm requires postinstall scripts to be opted into explicitly.
+# Both of these download a platform binary at install time and do nothing else.
+allowBuilds:
+  '@biomejs/biome': true
+  esbuild: true
