@@ -10,6 +10,7 @@ import { type Envelope, openEnvelope } from '../crypto/envelope.js'
 import { closePool, queryOne } from '../db/pool.js'
 import { signEvent, verifyEvent } from '../nostr/keys.js'
 import { prepareDatabase, truncateAll } from '../test/db.js'
+import { currentKid } from './kek.js'
 import { getActivePubkey, keyCustodyReport, withUserSecretKey } from './keys.js'
 import { createUserWithKey } from './users.js'
 
@@ -118,7 +119,9 @@ describe('custody', () => {
     await createUserWithKey({ email: 'ada@example.test' })
     await createUserWithKey({ email: 'grace@example.test' })
 
+    // Against the configured kid, not a literal — CI runs under a different one,
+    // and the claim is "custody is held by the deployment key", not "by test-1".
     const report = await keyCustodyReport()
-    expect(report).toEqual([{ kid: 'test-1', count: 2 }])
+    expect(report).toEqual([{ kid: currentKid(), count: 2 }])
   })
 })
