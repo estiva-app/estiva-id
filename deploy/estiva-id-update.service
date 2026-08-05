@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull and deploy the latest Estiva ID image
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/estiva-id/update.sh
+# Failures land in the journal:  journalctl -u estiva-id-update
+StandardOutput=journal
+StandardError=journal

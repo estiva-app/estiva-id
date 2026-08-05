@@ -1,0 +1,46 @@
+# Estiva ID on the box. Lives at /opt/estiva-id/docker-compose.yml.
+#
+# Reached exclusively through the Cloudflare Tunnel, so:
+#   * the app publishes on 127.0.0.1 only — never 0.0.0.0, which would be
+#     reachable past the Hetzner firewall;
+#   * Postgres publishes nothing at all and is reachable only on the compose
+#     network;
+#   * there is no TLS here. Cloudflare terminates it at the edge and
+#     `cloudflared` speaks plain HTTP to 127.0.0.1:8787.
+
+name: estiva-id
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: estiva_id
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: estiva_id
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U estiva_id -d estiva_id']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  estiva-id:
+    # Overridable so a rollback is `ESTIVA_ID_IMAGE=...:<sha> docker compose up -d`
+    # rather than an edit to this file. Stop the update timer first, or it will
+    # pull `main` back over the rollback within two minutes.
+    image: ${ESTIVA_ID_IMAGE:-ghcr.io/estiva-app/estiva-id:main}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://estiva_id:${POSTGRES_PASSWORD}@postgres:5432/estiva_id
+    ports:
+      - '127.0.0.1:8787:8787'
+
+volumes:
+  pgdata:

@@ -1,0 +1,10 @@
+// Production build: the service only.
+//
+// `tsconfig.json` deliberately includes tests so `pnpm typecheck` covers them.
+// The shipped image should not carry test helpers — `src/test/authenticator.ts`
+// in particular is a working WebAuthn authenticator, which has no business in a
+// production artifact.
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts", "src/test"]
+}

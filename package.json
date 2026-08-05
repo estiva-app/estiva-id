@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
@@ -17,7 +17,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "tsx src/db/migrate.ts",
+    "migrate:prod": "node dist/db/migrate.js",
     "seed": "tsx src/db/seed.ts",
+    "seed:prod": "node dist/db/seed.js",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"
   },

@@ -17,6 +17,12 @@
       "trailingCommas": "all"
     }
   },
+  "overrides": [
+    {
+      "include": ["tsconfig*.json"],
+      "json": { "parser": { "allowComments": true } }
+    }
+  ],
   "linter": {
     "enabled": true,
     "rules": {

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for a new Estiva ID image every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+# Two minutes is the deploy lag. It is the price of not opening an inbound port
+# for CI, which is a trade worth making for this service.
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

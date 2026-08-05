@@ -1,0 +1,36 @@
+# Ingress rules for the `estiva-prod` tunnel.
+#
+# Merge the `id.estiva.app` rule into the existing /etc/cloudflared/config.yml —
+# this file is a reference, not a drop-in replacement, since the tunnel already
+# serves the marketing site.
+#
+# Rules are evaluated in order and the catch-all must be last.
+
+tunnel: estiva-prod
+credentials-file: /etc/cloudflared/<tunnel-id>.json
+
+ingress:
+  # Estiva ID. Plain HTTP to loopback — Cloudflare terminates TLS at the edge,
+  # so there is no certificate here and no ACME challenge to satisfy.
+  - hostname: id.estiva.app
+    service: http://localhost:8787
+
+  # Our own workspace: the Buzz relay. Added when the relay lands (PEEK-59).
+  #
+  # Do NOT set httpHostHeader on this rule. Buzz resolves every request to a
+  # community from the original Host header, and an unmapped host fails closed
+  # with an empty response rather than an error — which is a genuinely horrible
+  # thing to debug. Leave Host untouched.
+  # - hostname: estiva.estiva.app
+  #   service: http://localhost:3000
+
+  # - hostname: peek.estiva.app
+  #   service: http://localhost:5173
+
+  # Marketing site — already configured.
+  - hostname: estiva.app
+    service: http://localhost:8080
+  - hostname: www.estiva.app
+    service: http://localhost:8080
+
+  - service: http_status:404

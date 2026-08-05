@@ -1,3 +1,12 @@
+# Local development only. Production compose lives in deploy/.
+#
+# The project name is explicit because the production file also declares one
+# (`estiva-id`), and compose derives an unnamed project from its directory —
+# which is also `estiva-id`. Running the production stack locally to test it
+# would otherwise recreate this stack's containers underneath you, which is a
+# confusing five minutes.
+name: estiva-id-dev
+
 services:
   postgres:
     image: postgres:16-alpine
