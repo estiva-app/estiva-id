@@ -21,7 +21,9 @@ cd "$DEPLOY_DIR"
 log() { echo "[$(date -Is)] $*"; }
 
 current_digest() {
-  docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo 'none'
+  local id
+  id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null | tail -n1)"
+  [[ -n "$id" ]] && echo "$id" || echo 'none'
 }
 
 before="$(current_digest)"
@@ -42,14 +44,28 @@ docker compose run --rm -T estiva-id node dist/db/migrate.js
 log 'restarting service'
 docker compose up -d estiva-id
 
-# Confirm the new container actually serves before calling this a success.
-# Without this the timer reports success for a container in a crash loop.
-for attempt in {1..15}; do
-  if curl -fsS --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
-    log 'healthy'
-    docker image prune -f --filter 'until=168h' >/dev/null 2>&1 || true
-    exit 0
-  fi
+# Confirm the new container actually serves before calling this a success —
+# without it the timer reports success for a container in a crash loop.
+#
+# Read Docker's own healthcheck rather than curling the published port: it needs
+# no tools beyond docker, and it does not care how (or whether) the port is
+# published to the host.
+container_health() {
+  local id
+  id="$(docker compose ps -q estiva-id 2>/dev/null || true)"
+  [[ -n "$id" ]] || { echo 'missing'; return; }
+  docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id" 2>/dev/null || echo 'missing'
+}
+
+for _ in {1..30}; do
+  case "$(container_health)" in
+    healthy)
+      log 'healthy'
+      docker image prune -f --filter 'until=168h' >/dev/null 2>&1 || true
+      exit 0
+      ;;
+    unhealthy) break ;;
+  esac
   sleep 2
 done
 
