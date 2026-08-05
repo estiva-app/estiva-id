@@ -43,7 +43,25 @@ That creates the DNS record. Then add the ingress rule from
 systemctl restart cloudflared
 ```
 
-### 2. Lay out the deploy directory
+### 2. Make the image pullable from the box
+
+**A new GHCR package is private by default**, even when its repository is public,
+so the box cannot pull it yet. Anonymous `docker pull ghcr.io/estiva-app/estiva-id:main`
+fails with `unauthorized` until this is fixed.
+
+Preferred, since the repo is public anyway:
+
+> GitHub → the `estiva-app` org → **Packages** → `estiva-id` → **Package settings**
+> → **Change visibility** → Public.
+
+The box then needs no registry credentials at all, which keeps the "no standing
+secrets on the server" posture.
+
+If the image must stay private, create a read-only PAT with `read:packages` and
+`docker login ghcr.io` **on the server** — never in GitHub Actions secrets, which
+have no use for it.
+
+### 3. Lay out the deploy directory
 
 ```bash
 mkdir -p /opt/estiva-id
@@ -56,7 +74,7 @@ into `/opt/estiva-id/`, then:
 chmod +x /opt/estiva-id/update.sh
 ```
 
-### 3. Fill in `.env` — and back up the KEK immediately
+### 4. Fill in `.env` — and back up the KEK immediately
 
 ```bash
 openssl rand -hex 24   # POSTGRES_PASSWORD
@@ -76,7 +94,7 @@ openssl rand -hex 32   # KEY_ENCRYPTION_KEK
 
 `.env` should be `chmod 600` and owned by root.
 
-### 4. Start it
+### 5. Start it
 
 ```bash
 cd /opt/estiva-id
@@ -93,7 +111,7 @@ and without it every signing request is refused as an unknown app:
 docker compose run --rm -T estiva-id node dist/db/seed.js
 ```
 
-### 5. Verify through the tunnel
+### 6. Verify through the tunnel
 
 ```bash
 curl https://id.estiva.app/healthz
@@ -105,7 +123,7 @@ curl https://id.estiva.app/.well-known/jwks.json
 `readyz` must report `"database":"ok"` and JWKS must return one key. That closes
 PEEK-85 and the last outstanding criterion on PEEK-25.
 
-### 6. Turn on automatic deploys
+### 7. Turn on automatic deploys
 
 ```bash
 cp estiva-id-update.service estiva-id-update.timer /etc/systemd/system/
@@ -120,7 +138,7 @@ systemctl list-timers estiva-id-update
 journalctl -u estiva-id-update -f
 ```
 
-### 7. Remove the validation container
+### 8. Remove the validation container
 
 ```bash
 docker rm -f estiva-test
