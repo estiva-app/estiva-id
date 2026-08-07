@@ -7,3 +7,7 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Pulled backup archives must never be committed, even encrypted.
+estiva-backups/
+*.tar.gz.age

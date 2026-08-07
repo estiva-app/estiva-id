@@ -264,8 +264,10 @@ and untar `minio.tar` into the MinIO volume.
 
 ### Rehearse it — the script is checked in
 
+The private key is **not on the server**, so supply it at rehearsal time:
+
 ```bash
-/opt/backup/restore-test.sh <user-id> <expected-pubkey>
+IDENTITY=/path/to/backup-key.txt /opt/backup/restore-test.sh <user-id> <expected-pubkey>
 ```
 
 Decrypts the newest archive into a scratch Postgres, restores it, and **signs an
@@ -273,15 +275,33 @@ event for a user whose key was custodied before the backup** — proving the
 archive, the KEK inside it and the envelope format all still line up. Verified
 2026-08-07: `verified: true, matchesOriginal: true`.
 
-An untested backup is a belief. Re-run this after any change to the custody
+Write the key to a temp file from your password manager, run this, then delete
+it. An untested backup is a belief; re-run after any change to the custody
 format or the compose layout.
 
-### Not yet off-box
+### Copies
 
-Archives currently sit on the **same disk as the data they protect**. That
-covers a bad migration or an accidental `DROP`, and covers nothing about the VM
-being lost. They are 40 KB and already encrypted, so the destination barely
-matters — it just has to exist.
+**On the box:** `/var/backups/estiva/`, 14 nightly archives. Covers a bad
+migration or an accidental `DROP`; covers nothing about losing the VM.
+
+**On a laptop:** `deploy/fetch-backups.sh` pulls them to `~/estiva-backups`.
+
+```bash
+./deploy/fetch-backups.sh
+```
+
+It skips what it already has and checks every file really is an age archive
+rather than a truncated transfer. **It only protects you as often as you run
+it** — a stopgap, not a solution. Run it before anything risky.
+
+The server holds only the *public* key (`/opt/backup/recipient.pub`), so it can
+write backups it cannot read. Everything pulled to a laptop is ciphertext too;
+the key that opens it lives only in a password manager.
+
+### Still missing: somewhere that does not depend on remembering
+
+Archives are 40 KB and already encrypted, so the destination barely matters —
+Cloudflare R2, a Hetzner Storage Box, anywhere. It just has to be automatic.
 
 ## What is not automated
 

@@ -3,9 +3,10 @@
 # a user whose key was custodied before the backup can still be signed for
 # after it. That is the only claim worth making about a backup.
 set -euo pipefail
-USER_ID="${1:?usage: restore-test.sh <user-id> <expected-pubkey>}"
+USER_ID="${1:?usage: IDENTITY=<age-key-file> restore-test.sh <user-id> <expected-pubkey>}"
 EXPECT_PUB="${2:?expected pubkey}"
 
+IDENTITY="${IDENTITY:-/root/estiva-backup-key.txt}"
 ARCHIVE=$(ls -1t /var/backups/estiva/estiva-*.tar.gz.age | head -1)
 WORK=$(mktemp -d); chmod 700 "$WORK"
 NET=restore-test-net
@@ -17,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "archive: $(basename "$ARCHIVE")"
-age -d -i /root/estiva-backup-key.txt "$ARCHIVE" | tar -C "$WORK" -xzf -
+age -d -i "$IDENTITY" "$ARCHIVE" | tar -C "$WORK" -xzf -
 echo "contents:"; ls -1 "$WORK" | sed 's/^/  /'
 
 KEK=$(grep '^KEY_ENCRYPTION_KEK=' "$WORK/estiva-id.env" | cut -d= -f2)
