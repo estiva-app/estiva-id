@@ -96,9 +96,16 @@ joined (PEEK-59).
 * ~~Confirm the revocation semantics above, with a test against a real relay.~~ — done, above.
 * `communities.host` seeded per workspace (PEEK-59) — seeded for
   `estiva.estiva.app`; the relay answers NIP-11 there, so the tenant resolves.
-* Remove the two app-side publishers: `peek-app/convex/nostr/publish.ts`
-  (`publishProfile`) and `estiva-ship/src/store.ts`. Until both are gone,
-  "published once" is a policy, not a fact.
+* ~~Remove Peek's publisher (`peek-app/convex/nostr/publish.ts`)~~ — done.
+* Remove Ship's publisher (`estiva-ship/src/store.ts`) — **blocked, and not on
+  effort.** Ship mints its key per-browser in localStorage
+  (`localIdentity('ship.secretkey')`, `apps/ship/app.ts`) and has no Estiva ID
+  integration at all. Estiva ID does not custody that key, so removing Ship's
+  publisher would delete the only writer rather than move it, and every Ship
+  author would render as 64 hex characters. Ship needs its equivalent of Peek's
+  *Accept Estiva ID tokens alongside Convex Auth* first.
+
+  Until then "published once" holds for Peek and is still a policy for Ship.
 
 ### Consequence to act on now
 
