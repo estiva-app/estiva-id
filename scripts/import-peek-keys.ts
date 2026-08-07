@@ -103,7 +103,7 @@ async function main(): Promise<void> {
 
       const userId = await withTransaction(async (client) => {
         const inserted = await client.query<{ id: string }>(
-          `insert into users (email, display_name) values ($1, $2) returning id`,
+          'insert into users (email, display_name) values ($1, $2) returning id',
           [record.email, record.name],
         )
         const id = inserted.rows[0]?.id
