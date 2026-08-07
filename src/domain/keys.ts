@@ -68,6 +68,35 @@ export async function findUserIdByPubkey(pubkey: string): Promise<string | undef
   return row?.user_id
 }
 
+export interface Signer {
+  userId: string
+  /** The *person's* status, not the key's. */
+  userStatus: 'active' | 'suspended' | 'offboarded'
+}
+
+/**
+ * Resolve who a pubkey signs for, and whether they are still allowed to.
+ *
+ * Two statuses matter here and they are easy to conflate: a key can be active
+ * while the person is not. Looking only at the key — which is what
+ * {@link findUserIdByPubkey} does — meant an offboarded person kept signing,
+ * because offboarding changes `users.status` and leaves the key alone.
+ *
+ * The two are returned separately so the caller can say *why* it refused. "No
+ * active key" and "this person has left" are different operational events and
+ * should not land in the audit log as the same thing.
+ */
+export async function findSignerByPubkey(pubkey: string): Promise<Signer | undefined> {
+  const row = await queryOne<{ user_id: string; user_status: Signer['userStatus'] }>(
+    `select k.user_id, u.status as user_status
+       from user_keys k
+       join users u on u.id = k.user_id
+      where k.pubkey = $1 and k.status = 'active'`,
+    [pubkey],
+  )
+  return row ? { userId: row.user_id, userStatus: row.user_status } : undefined
+}
+
 /**
  * Run `use` with the user's decrypted secret key, then zero it.
  *

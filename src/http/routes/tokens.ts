@@ -19,6 +19,7 @@ import { findAppPolicy } from '../../domain/apps.js'
 import { recordAudit } from '../../domain/audit.js'
 import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { requireSession } from '../middleware/session.js'
@@ -49,6 +50,23 @@ export function tokenRoutes(): Hono<AppEnv> {
     // — otherwise /sign would be deciding policy for an app that does not exist.
     const app = await findAppPolicy(parsed.data.clientId)
     if (!app || app.status !== 'active') throw forbidden('Unknown or disabled app')
+
+    // Sessions outlive an offboarding unless something revokes them, and a
+    // session is all `/token` needs. Checking the person here is what stops a
+    // leaver refreshing their way past the JWT expiry indefinitely.
+    const user = await findUserById(userId)
+    if (!user || user.status !== 'active') {
+      await recordAudit({
+        actorType: 'user',
+        actorUserId: userId,
+        actorClientId: parsed.data.clientId,
+        action: 'token.issue',
+        outcome: 'refused',
+        detail: { reason: user ? `user_${user.status}` : 'user_missing' },
+        requestId: c.get('requestId'),
+      })
+      throw forbidden('That identity is no longer active')
+    }
 
     const pubkey = await getActivePubkey(userId)
     if (!pubkey) throw forbidden('No active key for this identity')
