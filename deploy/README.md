@@ -219,6 +219,70 @@ Linux box behaves:
 docker exec estiva-id-estiva-id-1 node -e "fetch('http://127.0.0.1:8787/readyz').then(r=>r.text()).then(console.log)"
 ```
 
+## Backups
+
+`/opt/backup/backup.sh`, nightly at 03:30 UTC via `estiva-backup.timer`. Covers
+**the whole box** — Estiva ID and the relay — because a restore that recovers
+half a machine is not a restore.
+
+Each run writes one archive to `/var/backups/estiva/`, keeping 14:
+
+| Inside | Why |
+| --- | --- |
+| `estiva-id.sql` | Users, passkeys, encrypted Nostr keys, audit log |
+| `buzz.sql` | Events, channels, memberships |
+| `estiva-id.env` | Includes `KEY_ENCRYPTION_KEK` — without it the database above is unrecoverable ciphertext |
+| `buzz.env` | Includes `BUZZ_RELAY_PRIVATE_KEY`, the relay's identity |
+| `minio.tar` | Blossom blobs |
+
+### Why the secrets are inside the archive
+
+Everything is encrypted to an **age public key**, and the private half is not on
+the server — it lives in a password manager. The box can write backups it cannot
+read, so a stolen archive yields ciphertext rather than every identity in the
+system.
+
+That is stronger than the original plan of keeping dumps and secrets in separate
+places: separation protects you only until someone reaches both, whereas this
+protects the archive itself. It also makes a restore **self-contained** — one
+archive plus one key rebuilds the box, rather than a scavenger hunt through
+password-manager entries where the one everybody forgets is the one that makes
+the rest worthless.
+
+`KEY_ENCRYPTION_KEK` is *also* held separately in a password manager. That
+redundancy is deliberate: it is the single value whose loss cannot be recovered
+from anything else.
+
+### Restoring
+
+```bash
+age -d -i <backup-key> /var/backups/estiva/estiva-<stamp>.tar.gz.age | tar -xzf -
+```
+
+Then load `estiva-id.sql` / `buzz.sql` with `psql`, put the `.env` files back,
+and untar `minio.tar` into the MinIO volume.
+
+### Rehearse it — the script is checked in
+
+```bash
+/opt/backup/restore-test.sh <user-id> <expected-pubkey>
+```
+
+Decrypts the newest archive into a scratch Postgres, restores it, and **signs an
+event for a user whose key was custodied before the backup** — proving the
+archive, the KEK inside it and the envelope format all still line up. Verified
+2026-08-07: `verified: true, matchesOriginal: true`.
+
+An untested backup is a belief. Re-run this after any change to the custody
+format or the compose layout.
+
+### Not yet off-box
+
+Archives currently sit on the **same disk as the data they protect**. That
+covers a bad migration or an accidental `DROP`, and covers nothing about the VM
+being lost. They are 40 KB and already encrypted, so the destination barely
+matters — it just has to exist.
+
 ## What is not automated
 
 - **Backups** (PEEK-63) — the KEK and both databases. Urgent, and needed before

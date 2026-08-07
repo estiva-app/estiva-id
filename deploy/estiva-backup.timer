@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the encrypted backup nightly
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+# Spread the load a little; nothing here is time-critical to the minute.
+RandomizedDelaySec=15m
+# If the box was off at 03:30, back up as soon as it is on again rather than
+# silently skipping a day.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly encrypted backup of Estiva ID, the relay, and MinIO
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/backup/backup.sh
+# Failures land in the journal:  journalctl -u estiva-backup
+StandardOutput=journal
+StandardError=journal
