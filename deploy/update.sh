@@ -41,8 +41,15 @@ log "new image: ${before:0:19} -> ${after:0:19}"
 log 'running migrations'
 docker compose run --rm -T estiva-id node dist/db/migrate.js
 
+# --force-recreate is load-bearing. Plain `up -d` compares the *service
+# definition*, and pulling a new image behind an unchanged `:main` tag does not
+# change it — so compose reports "Running", touches nothing, and the deploy
+# silently does nothing while reporting success. Observed in production: the
+# timer pulled a new image, ran migrations, logged "healthy", and left the old
+# container serving for two hours. Worse, the next run saw the image already
+# pulled and exited early, so it would never have recovered on its own.
 log 'restarting service'
-docker compose up -d estiva-id
+docker compose up -d --force-recreate estiva-id
 
 # Confirm the new container actually serves before calling this a success —
 # without it the timer reports success for a container in a crash loop.
@@ -60,7 +67,15 @@ container_health() {
 for _ in {1..30}; do
   case "$(container_health)" in
     healthy)
-      log 'healthy'
+      # Healthy is not the same as updated. Confirm the container is actually
+      # running the image we just pulled — the failure this catches reported
+      # success while serving stale code, which is the worst kind.
+      running="$(docker inspect -f '{{.Image}}' "$(docker compose ps -q estiva-id)" 2>/dev/null || echo unknown)"
+      if [[ "$running" != "$after" ]]; then
+        log "FAILED: still running ${running:0:19}, expected ${after:0:19}"
+        exit 1
+      fi
+      log "healthy on ${running:0:19}"
       docker image prune -f --filter 'until=168h' >/dev/null 2>&1 || true
       exit 0
       ;;
