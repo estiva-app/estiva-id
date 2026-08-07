@@ -1,10 +1,15 @@
-# Ingress rules for the `estiva-prod` tunnel.
+# NOT CURRENTLY IN USE — kept for reference only.
 #
-# Merge the `id.estiva.app` rule into the existing /etc/cloudflared/config.yml —
-# this file is a reference, not a drop-in replacement, since the tunnel already
-# serves the marketing site.
+# The `estiva-prod` tunnel is **dashboard-managed**: its service unit runs
+# `cloudflared tunnel run --token-file /etc/cloudflared/token`, which means
+# routing is configured at https://one.dash.cloudflare.com under
+# Networks -> Tunnels -> estiva-prod -> Public Hostname.
 #
-# Rules are evaluated in order and the catch-all must be last.
+# A config.yml on the server is IGNORED by a token-run tunnel. Writing one and
+# restarting cloudflared changes nothing, which is a confusing half hour.
+#
+# This file is the equivalent configuration should the tunnel ever be converted
+# to file-managed. Rules are evaluated in order and the catch-all must be last.
 
 tunnel: estiva-prod
 credentials-file: /etc/cloudflared/<tunnel-id>.json

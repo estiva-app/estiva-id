@@ -31,17 +31,36 @@ box. The service speaks plain HTTP on `127.0.0.1:8787`.
 
 ### 1. Register the hostname on the tunnel
 
-```bash
-cloudflared tunnel route dns estiva-prod id.estiva.app
+**The `estiva-prod` tunnel is dashboard-managed**, confirmed by its service unit:
+
+```
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
 ```
 
-That creates the DNS record. Then add the ingress rule from
-[`cloudflared-ingress.example.yml`](cloudflared-ingress.example.yml) to
-`/etc/cloudflared/config.yml` and restart:
+`--token-file` means routing lives in Cloudflare's dashboard, not on the server.
+**Editing `/etc/cloudflared/config.yml` does nothing** for this tunnel, and
+`cloudflared tunnel route dns` is unnecessary — the dashboard creates the DNS
+record when the hostname is added.
 
-```bash
-systemctl restart cloudflared
-```
+So, in https://one.dash.cloudflare.com → **Networks** → **Tunnels** →
+**estiva-prod** → **Public Hostname** → **Add a public hostname**:
+
+| Field | Value |
+| -- | -- |
+| Subdomain | `id` |
+| Domain | `estiva.app` |
+| Path | *(empty)* |
+| Type | `HTTP` |
+| URL | `localhost:8787` |
+
+`HTTP`, not `HTTPS`: that is the hop from `cloudflared` to the local container,
+which has no certificate. The public side is HTTPS regardless — Cloudflare
+terminates it at the edge.
+
+Repeat for each service later: `estiva.estiva.app` → the relay's port,
+`peek.estiva.app` → Peek's. See
+[`cloudflared-ingress.example.yml`](cloudflared-ingress.example.yml) only if the
+tunnel is ever converted to file-managed.
 
 ### 2. Make the image pullable from the box
 
