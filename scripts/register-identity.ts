@@ -59,13 +59,13 @@ async function main(): Promise<void> {
   }
   const token = (await tokenResponse.json()) as { access_token: string; expires_in: number }
 
-  console.log(
-    JSON.stringify(
-      { email: EMAIL, pubkey: verified.pubkey, expiresIn: token.expires_in, accessToken: token.access_token },
-      null,
-      2,
-    ),
-  )
+  const result = {
+    email: EMAIL,
+    pubkey: verified.pubkey,
+    expiresIn: token.expires_in,
+    accessToken: token.access_token,
+  }
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 }
 
 await main()
