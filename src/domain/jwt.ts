@@ -31,7 +31,20 @@ import { query, queryOne } from '../db/pool.js'
 import { unauthenticated } from '../errors.js'
 import { currentKek, currentKid, resolveKek } from './kek.js'
 
-const ALG = 'ES256'
+/**
+ * RS256, not ES256.
+ *
+ * Convex rejects ES256 tokens with "Could not verify OIDC token claim", even
+ * though the same token verifies cleanly against our published JWKS with a
+ * standards-compliant library. Convex's own auth package signs RS256 and
+ * nothing in it mentions ES256, so RSA appears to be what its validator
+ * accepts. Its docs do not state a supported set, so this is empirical.
+ *
+ * ES256 is the nicer choice on the merits — smaller keys, smaller signatures —
+ * but "the relying party accepts it" beats elegance, and Convex is the relying
+ * party this exists to serve.
+ */
+const ALG = 'RS256'
 
 interface SigningKeyRow {
   kid: string
@@ -46,10 +59,20 @@ interface SigningKeyRow {
  * agreeing on one key rather than each serving tokens the other's JWKS omits.
  */
 export async function ensureActiveSigningKey(): Promise<string> {
-  const existing = await queryOne<{ kid: string }>(
-    "select kid from jwt_signing_keys where status = 'active'",
+  const existing = await queryOne<{ kid: string; alg: string }>(
+    "select kid, alg from jwt_signing_keys where status = 'active'",
   )
-  if (existing) return existing.kid
+
+  // An active key signed with a different algorithm than we now use cannot be
+  // loaded — `importJWK` would be handed an EC key and asked for RSA. Retire it
+  // and mint a replacement rather than crashing on every request until someone
+  // edits the database by hand. It stays in JWKS as `previous`, so tokens
+  // issued moments earlier keep validating until they expire.
+  if (existing && existing.alg !== ALG) {
+    await query("update jwt_signing_keys set status = 'previous' where kid = $1", [existing.kid])
+  } else if (existing) {
+    return existing.kid
+  }
 
   const { publicKey, privateKey } = await generateKeyPair(ALG, { extractable: true })
   const publicJwk = await exportJWK(publicKey)

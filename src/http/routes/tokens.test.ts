@@ -64,7 +64,7 @@ describe('discovery', () => {
     expect(doc).toMatchObject({
       issuer: cfg.ISSUER_URL,
       jwks_uri: `${cfg.ISSUER_URL}/.well-known/jwks.json`,
-      id_token_signing_alg_values_supported: ['ES256'],
+      id_token_signing_alg_values_supported: ['RS256'],
     })
   })
 
@@ -76,10 +76,16 @@ describe('discovery', () => {
     const jwks = JSON.parse(body) as { keys: Record<string, unknown>[] }
 
     expect(jwks.keys).toHaveLength(1)
-    expect(jwks.keys[0]).toMatchObject({ kty: 'EC', crv: 'P-256', alg: 'ES256', use: 'sig' })
-    // `d` is the private scalar of an EC JWK. Its presence would be the bug.
-    expect(jwks.keys[0]).not.toHaveProperty('d')
-    expect(body).not.toContain('"d"')
+    expect(jwks.keys[0]).toMatchObject({ kty: 'RSA', alg: 'RS256', use: 'sig' })
+
+    // An RSA private JWK carries several secret components, not just one — any
+    // of `d`, the primes, or the CRT parameters would leak the signing key.
+    // Checked by name and again over the raw body, so a nested or renamed field
+    // cannot slip through.
+    for (const secret of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
+      expect(jwks.keys[0]).not.toHaveProperty(secret)
+      expect(body).not.toContain(`"${secret}":`)
+    }
   })
 
   it('keeps the same kid across restarts', async () => {
