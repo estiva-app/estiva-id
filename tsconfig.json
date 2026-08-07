@@ -6,7 +6,8 @@
     "moduleResolution": "NodeNext",
     "types": ["node"],
 
-    "rootDir": "src",
+    // rootDir lives in tsconfig.build.json, not here: this config also covers
+    // `scripts/`, which sits outside src and is typechecked but never emitted.
     "outDir": "dist",
 
     "strict": true,
@@ -21,6 +22,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"],
+  // `scripts/` is typechecked but not built — those files handle key material
+  // and a duplicate identifier in one of them went unnoticed precisely because
+  // they were outside this list. `tsconfig.build.json` excludes them from dist.
+  "include": ["src/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }
