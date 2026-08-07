@@ -63,12 +63,18 @@ have no use for it.
 
 ### 3. Lay out the deploy directory
 
+From a machine that has this repo checked out (SSH is restricted to the home IP,
+so it has to be that one):
+
 ```bash
-mkdir -p /opt/estiva-id
+ssh root@167.233.252.136 'mkdir -p /opt/estiva-id'
+scp deploy/docker-compose.yml deploy/update.sh deploy/estiva-id-update.service deploy/estiva-id-update.timer root@167.233.252.136:/opt/estiva-id/
 ```
 
-Copy `docker-compose.yml`, `update.sh`, and `env.production.example` (as `.env`)
-into `/opt/estiva-id/`, then:
+Fetching these from GitHub on the server does not work while the repository is
+private — only the *package* is public, which is all the deploy needs.
+
+Then on the server:
 
 ```bash
 chmod +x /opt/estiva-id/update.sh
