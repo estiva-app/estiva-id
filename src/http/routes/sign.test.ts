@@ -198,3 +198,44 @@ describe('audit (PEEK-69)', () => {
     expect(JSON.stringify(row?.detail)).not.toContain('commercially sensitive')
   })
 })
+
+describe('NIP-98 once the deployment allows the relay', () => {
+  // The test environment allows http://relay.test/ (src/test/setup.ts), and the
+  // seed gives each app the deployment's own prefixes — so this exercises the
+  // configuration apps will actually run with, not a hand-built policy row.
+  const httpAuth = (url: string) => ({
+    kind: 27235,
+    tags: [
+      ['u', url],
+      ['method', 'POST'],
+    ],
+    content: '',
+  })
+
+  it('signs a NIP-98 event for the relay bridge', async () => {
+    const response = await sign(peekToken, httpAuth('http://relay.test/events'))
+    expect(response.status).toBe(200)
+
+    const { event } = (await response.json()) as { event: Parameters<typeof verifyEvent>[0] }
+    expect(event.kind).toBe(27235)
+    expect(verifyEvent(event)).toBe(true)
+  })
+
+  // Being open for the relay must not make it open generally — this is the
+  // whole reason the URL constraint exists rather than just allowing the kind.
+  it('still refuses a NIP-98 event for anywhere else', async () => {
+    const response = await sign(peekToken, httpAuth('https://evil.test/steal'))
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'nip98_url_not_allowed' } },
+    })
+  })
+
+  it('refuses a NIP-98 event with no destination at all', async () => {
+    const response = await sign(peekToken, { kind: 27235, tags: [['method', 'POST']], content: '' })
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'nip98_missing_url' } },
+    })
+  })
+})
