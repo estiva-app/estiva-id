@@ -52,3 +52,52 @@ export function computeEventId(event: UnsignedEvent): string {
 export function tagValue(event: UnsignedEvent, name: string): string | undefined {
   return event.tags.find((tag) => tag[0] === name)?.[1]
 }
+
+/** kind:0 — the profile metadata event. */
+export const KIND_PROFILE = 0
+
+export interface ProfileFields {
+  display_name?: string
+  /** Written alongside `display_name` — see below on why both. */
+  name?: string
+  picture?: string
+  about?: string
+  nip05?: string
+}
+
+/**
+ * Build a kind:0 profile event (PEEK-31).
+ *
+ * Two details decide whether this works, and both are easy to get wrong:
+ *
+ * **Key order is alphabetical.** Buzz builds profile content with
+ * `serde_json::Map`, which is a `BTreeMap` unless the `preserve_order` feature
+ * is enabled — and it is not enabled in Buzz's workspace. So keys serialize as
+ * about, display_name, name, nip05, picture. Content is a *string* inside the
+ * event, and the event id is a hash over it, so a different order is a
+ * different id for the same profile.
+ *
+ * **A field that is absent is a field that is cleared.** Omitting `nip05`
+ * revokes the handle, and so does an empty string — measured against the live
+ * relay (`estiva-ship` 63cd32d), which contradicted what reading
+ * `buzz-db/src/user.rs` suggested. That is what makes offboarding a publish
+ * rather than a special case, and it is why empty values are dropped here
+ * instead of being sent through: both spellings mean the same thing to the
+ * relay, so only one is ever emitted.
+ *
+ * `name` and `display_name` are both written because consumers read either —
+ * older events carry both, and dropping one makes a person render as their
+ * pubkey in whichever app happens to read the other.
+ */
+export function buildProfile(
+  pubkey: string,
+  createdAtSeconds: number,
+  fields: ProfileFields,
+): UnsignedEvent {
+  const present = Object.entries(fields).filter(([, value]) => value !== undefined && value !== '')
+  present.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const content = `{${present
+    .map(([key, value]) => `${JSON.stringify(key)}:${JSON.stringify(value)}`)
+    .join(',')}}`
+  return { pubkey, created_at: createdAtSeconds, kind: KIND_PROFILE, tags: [], content }
+}

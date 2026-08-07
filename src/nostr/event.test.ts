@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type UnsignedEvent, computeEventId } from './event.js'
+import { type UnsignedEvent, buildProfile, computeEventId } from './event.js'
 import { generateKeypair, signEvent, verifyEvent } from './keys.js'
 
 /**
@@ -75,6 +75,68 @@ describe('signEvent', () => {
     const { secretKey, publicKeyHex } = generateKeypair()
     const signed = signEvent({ ...BUZZ_MESSAGE, pubkey: publicKeyHex }, secretKey)
     expect(verifyEvent({ ...signed, content: 'tampered' })).toBe(false)
+  })
+})
+
+describe('buildProfile', () => {
+  // Buzz builds profile content with serde_json::Map — a BTreeMap, because
+  // `preserve_order` is not enabled in its workspace — so keys serialize
+  // alphabetically. Content is a string and the id hashes it, so insertion
+  // order leaking through would mean a different id for the same profile.
+  it('serializes content keys alphabetically, not in insertion order', () => {
+    const event = buildProfile(BUZZ_PUBKEY, 1_753_300_200, {
+      picture: 'https://example.test/a.png',
+      nip05: 'jan@estiva.estiva.app',
+      display_name: 'Jan',
+      about: 'Building Estiva',
+      name: 'Jan',
+    })
+
+    expect(event.content).toBe(
+      '{"about":"Building Estiva","display_name":"Jan","name":"Jan",' +
+        '"nip05":"jan@estiva.estiva.app","picture":"https://example.test/a.png"}',
+    )
+  })
+
+  it('is a kind:0 with no tags', () => {
+    const event = buildProfile(BUZZ_PUBKEY, 1_753_300_200, { display_name: 'Jan' })
+    expect(event.kind).toBe(0)
+    expect(event.tags).toEqual([])
+  })
+
+  /**
+   * Revocation is a publish, not a delete. Measured against the live relay
+   * (`estiva-ship` 63cd32d): omitting `nip05` revokes the handle, and so does
+   * an empty string. Reading `buzz-db/src/user.rs` suggested the opposite —
+   * that the column is only written when a value is present — which would have
+   * meant a leaver keeping their badge. It does not.
+   *
+   * Both spellings mean the same thing to the relay, so only one is emitted:
+   * an absent field. This test pins that, because a change here is the
+   * difference between offboarding working and appearing to work.
+   */
+  it('omits a cleared handle entirely rather than sending an empty string', () => {
+    const event = buildProfile(BUZZ_PUBKEY, 1_753_300_200, {
+      display_name: 'Jan',
+      nip05: undefined,
+    })
+    expect(event.content).not.toContain('nip05')
+
+    const emptied = buildProfile(BUZZ_PUBKEY, 1_753_300_200, {
+      display_name: 'Jan',
+      nip05: '',
+    })
+    expect(emptied.content).toBe(event.content)
+  })
+
+  it('produces a verifiable event once signed', () => {
+    const { secretKey, publicKeyHex } = generateKeypair()
+    const signed = signEvent(
+      buildProfile(publicKeyHex, 1_753_300_200, { display_name: 'Jan' }),
+      secretKey,
+    )
+    expect(verifyEvent(signed)).toBe(true)
+    expect(signed.kind).toBe(0)
   })
 })
 

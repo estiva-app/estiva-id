@@ -75,6 +75,32 @@ const schema = z.object({
    * and fail-closed matches Buzz's own posture on `pubkey_allowlist`.
    */
   SIGN_NIP98_ALLOWED_URL_PREFIXES: commaSeparated,
+
+  /**
+   * Where profiles are published (PEEK-31). Empty means **publishing is off**,
+   * which is the flag: a deployment with no relay still serves auth and tokens,
+   * it just cannot make a profile visible to anyone.
+   *
+   * This is the origin of Buzz's HTTP bridge, e.g. `https://estiva.estiva.app`.
+   */
+  RELAY_BRIDGE_URL: z
+    .string()
+    .default('')
+    .transform((raw) => raw.trim().replace(/\/+$/, '')),
+
+  /**
+   * The community host handles belong to — `estiva.estiva.app`.
+   *
+   * Not derived from RELAY_BRIDGE_URL even though they are the same string
+   * today. The relay is *where we publish*; the community host is *what a
+   * handle claims*, and Buzz compares the latter against `communities.host`
+   * with an exact string match. Conflating them means a bridge that moves
+   * behind a different origin silently rewrites everyone's handle.
+   */
+  COMMUNITY_HOST: z
+    .string()
+    .default('')
+    .transform((raw) => raw.trim().toLowerCase().replace(/\.$/, '')),
 })
 
 export type Config = z.infer<typeof schema>
