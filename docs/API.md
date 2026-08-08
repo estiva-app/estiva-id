@@ -46,6 +46,40 @@ Two authentication modes:
 
 Challenges are single-use and expire in 5 minutes.
 
+## Profile
+
+Estiva ID is the **sole publisher of `kind:0`** (PEEK-31). Apps do not get a way
+in here — `/sign` refuses `kind:0` for every app, always, and this route reaches
+the key through an internal path rather than through that endpoint.
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/me/profile` | Session | `{ displayName, picture, handle, communityHost, nip05, pubkey }`. |
+| `PUT` | `/me/profile` | Session | Partial update, then publish. `409` if the handle is taken; `403` once the identity is not `active`. |
+
+```json
+{ "displayName": "Ada", "picture": "https://…/a.png", "handle": "ada" }
+```
+
+**An absent key leaves a field alone; an explicit `null` clears it.** That
+distinction is deliberate — collapsing them would make an avatar edit silently
+revoke someone's `nip05`.
+
+`handle` is the local part only (`ada`), not the full `ada@estiva.estiva.app`.
+The domain comes from `COMMUNITY_HOST` and is joined at publish time, because
+Buzz *discards* a `kind:0` whose handle domain does not equal `communities.host`
+rather than returning an error.
+
+The response reports publishing separately from saving:
+
+```json
+{ "profile": { … }, "published": true, "eventId": "…" }
+```
+
+**A save that could not be published still succeeded.** Postgres is the record
+and the relay is a projection of it, so a relay outage leaves `published: false`
+with a `publishError` and the edit intact — it does not roll the edit back.
+
 ## Tokens and discovery
 
 | Method | Path | Auth | Notes |
@@ -59,7 +93,9 @@ Challenges are single-use and expire in 5 minutes.
 ```
 
 Claims: `iss` = issuer origin, `sub` = **the user's pubkey**, `aud` = the app's
-`client_id`. ES256.
+`client_id`. RS256 — **not** ES256, because Convex rejects ES256 tokens with
+`Could not verify OIDC token claim` even when they verify against our own JWKS
+with a compliant library. See `src/domain/jwt.ts` for the full reasoning.
 
 A relying party configures itself with the issuer URL and its `applicationID`,
 and resolves JWKS through discovery — the same flow as a Clerk or Auth0

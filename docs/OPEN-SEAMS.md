@@ -58,29 +58,54 @@ already sets `Access-Control-Allow-Origin: *`.
 Reimplementing a verified tenant seam to own a file is the wrong trade. Estiva
 ID keeps authority where it belongs — as the only publisher of `kind:0`.
 
-### The revocation question this reopens, and a trap to verify
+### The revocation question this reopens — measured, not inferred
 
 Serving from the relay means revoking a handle is a *publish*, not a local
 delete: Estiva ID republishes the person's `kind:0`, the relay syncs it.
 
-**Do not assume omitting the field revokes it.** In `buzz-db/src/user.rs` the
-update only touches `nip05_handle` when a value is present, so a `kind:0` with
-no `nip05` appears to leave the previous handle in place; clearing looks like it
-needs an explicitly empty value. Similarly, a handle that fails canonicalisation
-is *not applied* rather than clearing what is already there — which is a weaker
-guarantee than "silently cleared" implies.
+**Omitting the field revokes the handle, and so does an empty string.** Both
+spellings work.
 
-**Verify this against a running relay before offboarding depends on it.** It is
-the difference between a leaver losing their badge and keeping it.
+This reverses what was written here first. Reading `buzz-db/src/user.rs`
+suggested the update only touches `nip05_handle` when a value is present — so a
+`kind:0` with no `nip05` would leave the previous handle standing, and a leaver
+would keep their badge. That inference was wrong, and it was load-bearing enough
+that it should never have been left as an inference: measuring it against the
+live relay took four minutes. The probe is kept at
+`estiva-ship/scripts/probe-nip05.ts` because it is cheap to re-run and Buzz's
+sync behaviour here is undocumented — if it ever changes, that is what notices.
+
+Estiva ID emits the *absent* spelling: `buildProfile` drops empty values, so a
+cleared handle produces a `kind:0` with no `nip05` at all
+(`src/nostr/event.ts`, pinned by a test).
+
+One caveat from the same reading still stands and is **not** disproven: a handle
+that fails canonicalisation is *not applied* rather than clearing what is there.
+A `kind:0` whose handle domain does not equal `communities.host` is discarded
+silently, which is why the host is assembled at publish time rather than stored
+joined (PEEK-59).
 
 ### Still to implement
 
-* Publishing `kind:0` with the handle (PEEK-31), which is what makes any of this
-  reach the relay.
-* A handles table keyed by **`(person, workspace)`**, not by person — see the
-  multi-workspace note below.
-* Confirm the revocation semantics above, with a test against a real relay.
-* `communities.host` seeded per workspace (PEEK-59).
+* ~~Publishing `kind:0` with the handle (PEEK-31)~~ — done: `src/domain/profile.ts`
+  signs and publishes through the relay's `POST /events` bridge, using
+  `withUserSecretKey` rather than `/sign`, whose `kind:0` refusal stays absolute.
+* ~~A handles table keyed by **`(person, workspace)`**, not by person~~ — done:
+  `user_handles(user_id, community_host, handle)`, keyed by host so no
+  `workspaces` table is needed before PEEK-83 wants one.
+* ~~Confirm the revocation semantics above, with a test against a real relay.~~ — done, above.
+* `communities.host` seeded per workspace (PEEK-59) — seeded for
+  `estiva.estiva.app`; the relay answers NIP-11 there, so the tenant resolves.
+* ~~Remove Peek's publisher (`peek-app/convex/nostr/publish.ts`)~~ — done.
+* Remove Ship's publisher (`estiva-ship/src/store.ts`) — **blocked, and not on
+  effort.** Ship mints its key per-browser in localStorage
+  (`localIdentity('ship.secretkey')`, `apps/ship/app.ts`) and has no Estiva ID
+  integration at all. Estiva ID does not custody that key, so removing Ship's
+  publisher would delete the only writer rather than move it, and every Ship
+  author would render as 64 hex characters. Ship needs its equivalent of Peek's
+  *Accept Estiva ID tokens alongside Convex Auth* first.
+
+  Until then "published once" holds for Peek and is still a policy for Ship.
 
 ### Consequence to act on now
 

@@ -186,9 +186,26 @@ Stage 4. Conflating the two would force client-side signing now.
 
 ## 8. Deliberately not built yet
 
-Admin UI, profile editing, the `kind:0` publisher, the private directory,
-Blossom avatars, invites and offboarding, role and service identities, real
-`nostr.json` serving, any call to Buzz's admission API, and recovery flows.
+Admin UI, **any** user interface at all, the private directory, Blossom
+avatars, invites, role and service identities, any call to Buzz's admission
+API, and recovery flows.
+
+Two entries left this list on 2026-08-07 (PEEK-31):
+
+* **The `kind:0` publisher** is built — `src/domain/profile.ts` signs with the
+  custodied key through `withUserSecretKey` and publishes over the relay's
+  `POST /events` bridge. Estiva ID is now the sole writer; Peek's publisher is
+  removed and Ship's is blocked on PEEK-48.
+* **Profile editing** exists as an API — `GET`/`PUT /me/profile`. There is no
+  screen; this service still serves no HTML, and PEEK-68 is where that changes.
+
+`nostr.json` serving is off this list for a different reason: it is not ours to
+build. The relay serves it per workspace, and Estiva ID stays authoritative by
+publishing the profile the handle rides in.
+
+Offboarding is partly built: `/sign` and `/token` refuse a person who is not
+`active`, and revoking a handle works by republishing a `kind:0` without it.
+The one-action admin operation (PEEK-66) is not built.
 
 The two design questions that were held open — the domain layout for `nip05`
 (PEEK-33) and who drives community admission (PEEK-36) — were **decided on
