@@ -53,8 +53,19 @@ jobs:
       - name: Lint and format check
         run: pnpm lint
 
+      # `pnpm build` compiles the service; `pnpm typecheck` also covers the
+      # tests and the UI, which the build deliberately excludes.
       - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build service
         run: pnpm build
+
+      # Before the tests, not after: the UI is only mounted when a build exists,
+      # so without this the tests would exercise the API-only shape and the
+      # SPA fallback would go unchecked.
+      - name: Build UI
+        run: pnpm build:web
 
       - name: Run migrations
         run: pnpm migrate

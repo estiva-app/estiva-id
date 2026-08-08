@@ -74,3 +74,23 @@ export async function revokeAllSessions(userId: string): Promise<number> {
   )
   return result.rowCount ?? 0
 }
+
+/**
+ * Sign out everywhere *except here*.
+ *
+ * The self-serve version of the above, and deliberately not the same call.
+ * Offboarding wants every session gone including the leaver's current one;
+ * a person clicking "sign out my other devices" after losing a laptop does
+ * not want to be signed out of the page they are clicking in. Reusing
+ * {@link revokeAllSessions} for both would make the safe action feel like a
+ * malfunction, and the natural fix — logging back in — is exactly what someone
+ * with a stolen cookie would also be able to do.
+ */
+export async function revokeOtherSessions(userId: string, keepSessionId: string): Promise<number> {
+  const result = await query(
+    `update sessions set revoked_at = now()
+      where user_id = $1 and id <> $2 and revoked_at is null`,
+    [userId, keepSessionId],
+  )
+  return result.rowCount ?? 0
+}

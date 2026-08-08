@@ -41,7 +41,12 @@ import {
   revokeCredential,
 } from '../../domain/credentials.js'
 import { getActivePubkey } from '../../domain/keys.js'
-import { SESSION_COOKIE, createSession, revokeSession } from '../../domain/sessions.js'
+import {
+  SESSION_COOKIE,
+  createSession,
+  revokeOtherSessions,
+  revokeSession,
+} from '../../domain/sessions.js'
 import { createUserWithKey, findUserByEmail, findUserById } from '../../domain/users.js'
 import { badRequest, conflict, forbidden, notFound, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
@@ -327,6 +332,29 @@ export function authRoutes(): Hono<AppEnv> {
   routes.get('/me/credentials', requireSession, async (c) => {
     const { userId } = c.get('session')
     return c.json({ credentials: await listCredentialSummaries(userId) })
+  })
+
+  /**
+   * Sign out every other device, keeping this one.
+   *
+   * The companion to revoking a lost passkey: revoking the credential stops it
+   * being used to *authenticate* again, but any session it already minted stays
+   * valid until it expires. Someone who has lost a laptop needs both, and only
+   * this half is time-critical.
+   */
+  routes.post('/me/sessions/revoke-others', requireSession, async (c) => {
+    const session = c.get('session')
+    const revoked = await revokeOtherSessions(session.userId, session.id)
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: session.userId,
+      action: 'session.revoke_others',
+      outcome: 'success',
+      detail: { revoked },
+      requestId: c.get('requestId'),
+    })
+    return c.json({ revoked })
   })
 
   routes.delete('/me/credentials/:id', requireSession, async (c) => {

@@ -13,6 +13,7 @@ import { authRoutes } from './routes/auth.js'
 import { profileRoutes } from './routes/profile.js'
 import { signRoutes } from './routes/sign.js'
 import { tokenRoutes } from './routes/tokens.js'
+import { mountUi, uiIsBuilt } from './ui.js'
 
 export interface AppEnv {
   Variables: {
@@ -66,6 +67,10 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', tokenRoutes())
   app.route('/', signRoutes())
   app.route('/', profileRoutes())
+
+  // After the API routes, so the UI's catch-all can never shadow one, and only
+  // when a build is present — see ui.ts.
+  if (uiIsBuilt()) mountUi(app)
 
   app.notFound((c) =>
     c.json(

@@ -1,6 +1,6 @@
 # Estiva ID — production image.
 #
-# Four stages so the runtime carries neither the toolchain nor dev dependencies.
+# Five stages so the runtime carries neither the toolchain nor dev dependencies.
 # The migration runner ships too: `node dist/db/migrate.js` resolves migrations
 # relative to its own location, so `migrations/` must be present in the image.
 
@@ -16,6 +16,15 @@ WORKDIR /app
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN pnpm build
+
+
+# The account UI (PEEK-68), built separately so a change to the page does not
+# invalidate the service build's layer cache, or the other way round.
+FROM deps AS build-web
+WORKDIR /app
+COPY vite.config.ts ./
+COPY web ./web
+RUN pnpm build:web
 
 
 # Production dependencies only, resolved from the same lockfile.
@@ -34,6 +43,7 @@ ENV PORT=8787
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build-web /app/dist-web ./dist-web
 COPY migrations ./migrations
 COPY package.json ./
 

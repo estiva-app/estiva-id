@@ -258,4 +258,32 @@ describe('sessions', () => {
     expect((await post('/auth/logout', {}, cookie)).status).toBe(200)
     expect((await app.request('/me', { headers: { cookie } })).status).toBe(401)
   })
+
+  /**
+   * The half of "I lost my laptop" that revoking a passkey does not cover:
+   * the credential can no longer authenticate, but sessions it already minted
+   * stay valid until they expire.
+   */
+  it('revokes other sessions and keeps the one that asked', async () => {
+    const { device, cookie: first } = await register('ada@example.test')
+
+    // A second sign-in on the same account — the lost laptop.
+    const optionsResponse = await post('/auth/login/options', {})
+    const options = (await optionsResponse.json()) as { challenge: string }
+    const loginResponse = await post('/auth/login/verify', device.authenticate(options.challenge))
+    expect(loginResponse.status).toBe(200)
+    const second = sessionCookie(loginResponse)
+
+    const revoked = await post('/me/sessions/revoke-others', {}, second)
+    expect(revoked.status).toBe(200)
+    expect(await revoked.json()).toEqual({ revoked: 1 })
+
+    // The caller stays signed in; the other session is gone.
+    expect((await app.request('/me', { headers: { cookie: second } })).status).toBe(200)
+    expect((await app.request('/me', { headers: { cookie: first } })).status).toBe(401)
+  })
+
+  it('needs a session of its own', async () => {
+    expect((await post('/me/sessions/revoke-others', {})).status).toBe(401)
+  })
 })

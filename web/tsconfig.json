@@ -1,0 +1,26 @@
+// The UI's own config: DOM types and JSX, neither of which belongs in the
+// service's Node-targeted `tsconfig.json`. Kept separate rather than widened
+// there, so a server file cannot quietly start using `window`.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client"],
+
+    "jsx": "react-jsx",
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../vite.config.ts"]
+}
