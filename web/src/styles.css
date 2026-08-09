@@ -275,3 +275,9 @@ ul.credentials li:first-child {
   text-align: center;
   color: var(--text-dim);
 }
+
+/* The sign-in and enrolment screens are a single card, not a dashboard. */
+.page.narrow {
+  max-width: 30rem;
+  padding-top: 4rem;
+}

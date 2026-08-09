@@ -5,7 +5,10 @@
  * `code` (see `docs/API.md`), so unwrapping it once means the UI can branch on
  * `code` and `detail.reason` rather than on message strings.
  */
-import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/browser'
 
 export type ErrorCode =
   | 'bad_request'
@@ -103,6 +106,53 @@ export const saveProfile = (update: {
   handle?: string | null
 }) => request<SaveProfileResult>('/me/profile', { method: 'PUT', body: JSON.stringify(update) })
 
+// --- Getting in ---------------------------------------------------------------
+
+export const loginOptions = () =>
+  request<PublicKeyCredentialRequestOptionsJSON>('/auth/login/options', { method: 'POST' })
+
+export const loginVerify = (assertion: unknown) =>
+  request<{ verified: boolean; pubkey: string }>('/auth/login/verify', {
+    method: 'POST',
+    body: JSON.stringify(assertion),
+  })
+
+export interface InvitePreview {
+  email: string
+  displayName: string | null
+  handle: string | null
+}
+
+/**
+ * What an invite says, for somebody who has no session yet.
+ *
+ * `404` for unknown, expired and consumed alike — the reason is in the body,
+ * so the screen can say which without the endpoint letting anyone probe.
+ */
+export async function getInvite(
+  token: string,
+): Promise<{ valid: true; invite: InvitePreview } | { valid: false; reason: string }> {
+  const response = await fetch(`/invites/${encodeURIComponent(token)}`, {
+    credentials: 'same-origin',
+  })
+  const body = (await response.json()) as
+    | { valid: true; email: string; displayName: string | null; handle: string | null }
+    | { valid: false; reason: string }
+
+  if (!body.valid) return { valid: false, reason: body.reason }
+  return {
+    valid: true,
+    invite: { email: body.email, displayName: body.displayName, handle: body.handle },
+  }
+}
+
+/** Enrolment takes the invite, not an email — the invite carries the address. */
+export const registerOptions = (inviteToken: string) =>
+  request<PublicKeyCredentialCreationOptionsJSON>('/auth/register/options', {
+    method: 'POST',
+    body: JSON.stringify({ inviteToken }),
+  })
+
 // --- Passkeys ---------------------------------------------------------------
 
 export interface Credential {
@@ -138,4 +188,4 @@ export const revokeOtherSessions = () =>
 export const logout = () => request<{ ok: true }>('/auth/logout', { method: 'POST' })
 
 /** Re-exported so callers do not each import from the WebAuthn package. */
-export type { PublicKeyCredentialCreationOptionsJSON }
+export type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON }
