@@ -13,6 +13,12 @@ export interface User {
   email: string | null
   display_name: string | null
   status: 'active' | 'suspended' | 'offboarded'
+  /**
+   * What they may do while active — a different axis from `status`, which says
+   * whether they may act at all. Conflating them makes "suspended admin"
+   * unrepresentable (PEEK-65).
+   */
+  role: 'admin' | 'member'
 }
 
 export interface UserWithPubkey extends User {
@@ -21,13 +27,15 @@ export interface UserWithPubkey extends User {
 
 export async function findUserByEmail(email: string): Promise<User | undefined> {
   return queryOne<User>(
-    'select id, email, display_name, status from users where lower(email) = lower($1)',
+    'select id, email, display_name, status, role from users where lower(email) = lower($1)',
     [email],
   )
 }
 
 export async function findUserById(id: string): Promise<User | undefined> {
-  return queryOne<User>('select id, email, display_name, status from users where id = $1', [id])
+  return queryOne<User>('select id, email, display_name, status, role from users where id = $1', [
+    id,
+  ])
 }
 
 /**
@@ -84,12 +92,13 @@ export async function offboardUser(userId: string): Promise<{ sessionsRevoked: n
 export async function createUserWithKey(input: {
   email: string
   displayName?: string | undefined
+  role?: 'admin' | 'member'
 }): Promise<UserWithPubkey> {
   return withTransaction(async (client) => {
     const inserted = await client.query<User>(
-      `insert into users (email, display_name) values ($1, $2)
-       returning id, email, display_name, status`,
-      [input.email, input.displayName ?? null],
+      `insert into users (email, display_name, role) values ($1, $2, $3)
+       returning id, email, display_name, status, role`,
+      [input.email, input.displayName ?? null, input.role ?? 'member'],
     )
     const user = inserted.rows[0]
     if (!user) throw new Error('user insert returned no row')

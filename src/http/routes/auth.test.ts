@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { config } from '../../config.js'
 import { closePool, queryOne } from '../../db/pool.js'
+import { createInvite } from '../../domain/invites.js'
 import { SoftwareAuthenticator } from '../../test/authenticator.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
 import { createApp } from '../app.js'
@@ -35,10 +36,23 @@ async function post(path: string, body: unknown, cookie?: string): Promise<Respo
   })
 }
 
-/** Register a fresh user and return their cookie, authenticator and pubkey. */
-async function register(email: string) {
+/**
+ * Register a fresh user and return their cookie, authenticator and pubkey.
+ *
+ * Enrolment needs an invite since PEEK-65, so one is minted directly rather
+ * than through `POST /invites` — that route needs an admin, and an admin needs
+ * an enrolment, which is the loop `scripts/create-invite.ts` exists to break.
+ */
+async function register(email: string, role: 'admin' | 'member' = 'member') {
   const device = authenticator()
-  const optionsResponse = await post('/auth/register/options', { email, displayName: 'Test User' })
+  const invite = await createInvite({
+    email,
+    displayName: 'Test User',
+    role,
+    createdBy: null,
+  })
+
+  const optionsResponse = await post('/auth/register/options', { inviteToken: invite.token })
   expect(optionsResponse.status).toBe(200)
   const options = (await optionsResponse.json()) as { challenge: string }
 
@@ -88,9 +102,14 @@ describe('registration', () => {
     expect(row?.envelope).toBe(pubkey)
   })
 
+  // Even a fresh, valid invite cannot mint a second identity for an address
+  // that can already sign in — that would be one human with two pubkeys, the
+  // exact thing this project exists to prevent.
   it('refuses a second registration for an email that already has a passkey', async () => {
     await register('ada@example.test')
-    const again = await post('/auth/register/options', { email: 'ada@example.test' })
+    const second = await createInvite({ email: 'ada@example.test', createdBy: null })
+
+    const again = await post('/auth/register/options', { inviteToken: second.token })
     expect(again.status).toBe(409)
   })
 
@@ -103,8 +122,9 @@ describe('registration', () => {
 
   it('rejects a replayed registration challenge', async () => {
     const device = authenticator()
+    const invite = await createInvite({ email: 'ada@example.test', createdBy: null })
     const options = (await (
-      await post('/auth/register/options', { email: 'ada@example.test' })
+      await post('/auth/register/options', { inviteToken: invite.token })
     ).json()) as { challenge: string }
 
     const first = await post('/auth/register/verify', device.register(options.challenge))

@@ -21,7 +21,7 @@ export async function prepareDatabase(): Promise<void> {
 export async function truncateAll(): Promise<void> {
   await query(
     `truncate users, webauthn_credentials, webauthn_challenges, user_keys,
-              user_handles, sessions, audit_events, authorization_codes,
+              user_handles, sessions, audit_events, authorization_codes, invites,
               app_credentials, jwt_signing_keys
      restart identity cascade`,
   )
