@@ -22,7 +22,8 @@
     "migrate:prod": "node dist/db/migrate.js",
     "seed": "tsx src/db/seed.ts",
     "seed:prod": "node dist/db/seed.js",
-    "invite": "tsx scripts/create-invite.ts",
+    "invite": "tsx src/admin/create-invite.ts",
+    "invite:prod": "node dist/admin/create-invite.js",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"
   },

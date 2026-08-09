@@ -73,8 +73,12 @@ reopens onto the same half-made account.
 An invite needs an admin, and a fresh deployment has none. On the box:
 
 ```bash
-EMAIL=you@example.com ROLE=admin pnpm invite
+cd /opt/estiva-id && docker compose run --rm -T \
+  -e EMAIL=you@example.com -e ROLE=admin -e HANDLE=you \
+  estiva-id node dist/admin/create-invite.js
 ```
+
+Locally, `EMAIL=… ROLE=admin pnpm invite`.
 
 The first invite **must** be `ROLE=admin`; a member invite into an empty
 workspace produces somebody who can sign in and invite nobody.

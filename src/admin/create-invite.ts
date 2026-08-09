@@ -1,7 +1,7 @@
 /**
  * Mint an invite from the box — including the very first one.
  *
- *   EMAIL=jan@example.com ROLE=admin npx tsx scripts/create-invite.ts
+ *   EMAIL=jan@example.com ROLE=admin pnpm invite
  *
  * ## Why a script exists at all
  *
@@ -18,11 +18,24 @@
  *
  * After the first admin exists, prefer `POST /invites` — this stays for
  * recovery, for the day the only admin loses their passkey.
+ *
+ * ## Why this lives in `src/` rather than `scripts/`
+ *
+ * Because it has to run in the production image, and `scripts/` does not ship:
+ * `tsconfig.build.json` excludes it, the Dockerfile never copies it, and `tsx`
+ * is a dev dependency. A bootstrap that only runs on a developer's laptop is
+ * not a bootstrap — the deployment that needs it is precisely the one with
+ * nothing on it yet. `migrate.ts` and `seed.ts` ship for the same reason.
+ *
+ * On the box:
+ *
+ *   docker compose run --rm -T -e EMAIL=you@example.com -e ROLE=admin \
+ *     estiva-id node dist/admin/create-invite.js
  */
-import { config } from '../src/config.js'
-import { closePool } from '../src/db/pool.js'
-import { INVITE_TTL_HOURS, anyAdminExists, createInvite } from '../src/domain/invites.js'
-import { findUserByEmail } from '../src/domain/users.js'
+import { config } from '../config.js'
+import { closePool } from '../db/pool.js'
+import { INVITE_TTL_HOURS, anyAdminExists, createInvite } from '../domain/invites.js'
+import { findUserByEmail } from '../domain/users.js'
 
 const EMAIL = process.env.EMAIL ?? ''
 const ROLE = (process.env.ROLE ?? 'member') as 'admin' | 'member'
