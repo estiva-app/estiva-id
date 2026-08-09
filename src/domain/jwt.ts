@@ -197,17 +197,25 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
 /**
  * OIDC discovery document.
  *
- * Not a general-purpose OpenID Provider — there is no authorization code flow
- * here. It advertises exactly what a relying party needs to find and trust the
- * JWKS, which is what `convex/auth.config.ts` resolves from `domain`.
+ * Still not a general-purpose OpenID Provider — no refresh tokens, no id_token,
+ * no userinfo. It advertises what a relying party needs to find and trust the
+ * JWKS (which is what `convex/auth.config.ts` resolves from `domain`), plus the
+ * authorization code flow added in PEEK-90 so a browser app on another origin
+ * can obtain a token at all.
  */
 export function discoveryDocument(): Record<string, unknown> {
   const issuer = config().ISSUER_URL
   return {
     issuer,
     jwks_uri: `${issuer}/.well-known/jwks.json`,
+    authorization_endpoint: `${issuer}/authorize`,
     token_endpoint: `${issuer}/token`,
-    response_types_supported: ['token'],
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code'],
+    // S256 only. `plain` is permitted by RFC 7636 and protects nothing an
+    // interceptor cannot replay, so advertising it would only invite a client
+    // to choose it.
+    code_challenge_methods_supported: ['S256'],
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: [ALG],
     claims_supported: ['sub', 'aud', 'iss', 'exp', 'iat'],

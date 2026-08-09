@@ -86,7 +86,69 @@ with a `publishError` and the edit intact — it does not roll the edit back.
 | --- | --- | --- | --- |
 | `GET` | `/.well-known/openid-configuration` | — | Discovery. |
 | `GET` | `/.well-known/jwks.json` | — | Active key plus any `previous` one. |
-| `POST` | `/token` | Session | Body `{ clientId }`. Returns an audience-bound JWT. |
+| `GET` | `/authorize` | Session | Browser redirect. Issues an authorization code. |
+| `POST` | `/token` | Session **or** code | Two grants — see below. |
+
+### Two grants, and why both exist
+
+**`authorization_code` with PKCE** is how an app on another origin gets a token.
+It has to be a redirect flow: the session cookie is `SameSite=Lax` and this
+service serves no CORS, so a cross-origin `fetch` carrying credentials is
+blocked twice over. Neither is worth relaxing on the origin that holds every
+custodied signing key.
+
+**The session grant** stays because the account page is served from this very
+origin, and making it round-trip through a redirect to reach its own backend
+would be ceremony with nothing to show for it.
+
+The body selects the grant; there is one endpoint, which is what discovery
+advertises.
+
+### `GET /authorize`
+
+```
+/authorize?client_id=…&redirect_uri=…&response_type=code
+          &code_challenge=…&code_challenge_method=S256&state=…
+```
+
+`code_challenge` is `base64url(sha256(code_verifier))` — 43 characters. **`S256`
+only**; `plain` is refused, because it protects nothing an interceptor cannot
+replay.
+
+Failures split in two, deliberately:
+
+* **An unknown `client_id` or an unregistered `redirect_uri` renders a `400`
+  here and does not redirect.** Bouncing to an unvalidated URI is how an
+  identity provider becomes an open redirector, and the payload is a code.
+* **Anything after that goes back to the app** as `?error=…&state=…`, which is
+  what OAuth clients read.
+
+No session means a `302` to `/?next=<relative path>` so the person can sign in
+and be replayed. Redirect URIs are matched **exactly**, never by prefix.
+
+There is no consent screen: every app is first-party. That changes the day a
+third-party app is registered.
+
+### `POST /token`
+
+```json
+{ "grantType": "authorization_code", "code": "…", "clientId": "…",
+  "redirectUri": "…", "codeVerifier": "…" }
+```
+
+or, from this origin with a session cookie:
+
+```json
+{ "clientId": "estiva-peek" }
+```
+
+Both return the same body. **Every code-grant refusal is `invalid_grant`** —
+unknown, expired, replayed, wrong verifier and wrong redirect URI are one
+answer to the caller and distinct reasons in `audit_events`. The distinction
+matters to us; handing it to a redeemer is handing them a probe.
+
+A code is single-use, lives 60 seconds, and is **burned on any redemption
+attempt**, successful or not: one that has been presented has been in the wild.
 
 ```json
 { "access_token": "…", "token_type": "Bearer", "expires_in": 600, "pubkey": "…", "issuer": "…" }

@@ -101,6 +101,21 @@ const schema = z.object({
     .string()
     .default('')
     .transform((raw) => raw.trim().toLowerCase().replace(/\.$/, '')),
+
+  /**
+   * Where each app may be sent back to after `/authorize` (PEEK-90),
+   * comma-separated and matched **exactly**.
+   *
+   * Empty means that app cannot use the redirect flow — the same fail-closed
+   * posture as the NIP-98 allowlist, and for a sharper reason: the thing being
+   * redirected is an authorization code, so a loose entry here is an account
+   * takeover rather than a nuisance.
+   *
+   * Exact, never prefix. As a prefix, `https://app.test/cb` would also permit
+   * `https://app.test/cb.attacker.example`.
+   */
+  PEEK_REDIRECT_URIS: commaSeparated,
+  SHIP_REDIRECT_URIS: commaSeparated,
 })
 
 export type Config = z.infer<typeof schema>
