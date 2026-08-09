@@ -5,9 +5,10 @@
  * this is the self-serve half — the things a person can do without asking
  * anyone: change how they appear, add a device, drop one they have lost.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
+import { SignIn } from './SignIn'
 import {
   ApiError,
   type Credential,
@@ -31,49 +32,79 @@ type State =
   | { kind: 'error'; message: string }
   | ({ kind: 'ready' } & Loaded)
 
+/**
+ * Where to send someone after they authenticate.
+ *
+ * `/authorize` bounces an unauthenticated person here with `?next=`, so this is
+ * what completes the OAuth flow (PEEK-90) rather than dumping them on their
+ * account page mid-redirect.
+ *
+ * **Only same-origin paths.** `next` is attacker-influenced, and honouring an
+ * absolute URL would make this an open redirect on the origin that holds every
+ * custodied key — undoing the redirect-URI allowlisting `/authorize` does. A
+ * leading `//` is rejected too: `//evil.test` is protocol-relative and a
+ * browser reads it as another host.
+ */
+function safeNext(): string | null {
+  const next = new URLSearchParams(window.location.search).get('next')
+  if (!next || !next.startsWith('/') || next.startsWith('//')) return null
+  return next
+}
+
 export function App() {
   const [state, setState] = useState<State>({ kind: 'loading' })
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const [me, profile, credentials] = await Promise.all([
-          getMe(),
-          getProfile(),
-          listCredentials(),
-        ])
-        if (!cancelled) setState({ kind: 'ready', me, profile, credentials })
-      } catch (error) {
-        if (cancelled) return
-        if (error instanceof ApiError && error.code === 'unauthenticated') {
-          setState({ kind: 'signed-out' })
-          return
-        }
-        setState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Could not load your account',
-        })
+  const load = useCallback(async () => {
+    try {
+      const [me, profile, credentials] = await Promise.all([
+        getMe(),
+        getProfile(),
+        listCredentials(),
+      ])
+      setState({ kind: 'ready', me, profile, credentials })
+      return true
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'unauthenticated') {
+        setState({ kind: 'signed-out' })
+        return false
       }
-    })()
-    return () => {
-      cancelled = true
+      setState({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Could not load your account',
+      })
+      return false
     }
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  /**
+   * A full navigation rather than a state change, deliberately.
+   *
+   * `next` points at `/authorize`, which is a *server* route that has to issue
+   * a redirect — rendering it client-side would show the app shell where an
+   * OAuth code should be.
+   */
+  const onSignedIn = useCallback(async () => {
+    const next = safeNext()
+    if (next) {
+      window.location.assign(next)
+      return
+    }
+    // Drop `?invite=…` from the address bar: it is spent, and leaving a bearer
+    // token in history and in every screenshot afterwards is careless.
+    window.history.replaceState({}, '', window.location.pathname)
+    await load()
+  }, [load])
 
   if (state.kind === 'loading') {
     return <div className="centered">Loading your account…</div>
   }
 
-  // Sign-in itself is not built here. Registration and login exist as API
-  // routes (PEEK-26) but the screens for them are not this ticket, and guessing
-  // at that flow would mean two sign-in surfaces to reconcile later.
   if (state.kind === 'signed-out') {
-    return (
-      <div className="centered">
-        <p>You are not signed in.</p>
-      </div>
-    )
+    return <SignIn onSignedIn={onSignedIn} />
   }
 
   if (state.kind === 'error') {
@@ -101,6 +132,20 @@ export function App() {
           Sign out
         </button>
       </header>
+
+      {/*
+        An invite link opened by somebody who is already signed in.
+        Without saying so, they see their own account and reasonably conclude
+        the invite worked — which is exactly what happens when a link meant for
+        a colleague gets forwarded and opened by the wrong person.
+      */}
+      {new URLSearchParams(window.location.search).has('invite') && (
+        <div className="notice warn">
+          You are signed in as {me.email ?? 'this account'}, so that invite link was not used. If it
+          was meant for somebody else, send it to them — it still works. To use it yourself, sign
+          out first.
+        </div>
+      )}
 
       {me.status !== 'active' && (
         <div className="notice warn">
