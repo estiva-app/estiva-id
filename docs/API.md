@@ -34,7 +34,7 @@ Two authentication modes:
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| `POST` | `/auth/register/options` | — | Body `{ email, displayName? }`. Creates the user and mints their key. `409` if the email already has a passkey. |
+| `POST` | `/auth/register/options` | Invite | Body `{ inviteToken }`. Creates the user and mints their key. `403` without a valid invite; `409` if the email already has a passkey. |
 | `POST` | `/auth/register/verify` | — | Body is the WebAuthn attestation response. Sets the session cookie. |
 | `POST` | `/auth/login/options` | — | Usernameless: no `allowCredentials`. |
 | `POST` | `/auth/login/verify` | — | Body is the WebAuthn assertion. Sets the session cookie. |
@@ -45,6 +45,47 @@ Two authentication modes:
 | `DELETE` | `/me/credentials/:id` | Session | `404` if not yours. `409` if it is your only passkey. |
 
 Challenges are single-use and expire in 5 minutes.
+
+## Invites
+
+Registration is **invite-only** (PEEK-65). No password is created or sent — the
+link's only job is to authorise exactly one passkey enrolment.
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/invites` | Session, **admin** | Body `{ email, displayName?, handle?, role? }`. Returns the link **once**. `409` if the email already exists. |
+| `GET` | `/invites` | Session, **admin** | Outstanding invites. `started: true` means somebody opened the link and never finished. |
+| `GET` | `/invites/:token` | — | Prefill for the enrolment screen. `404` for unknown, expired *and* consumed alike, so tokens cannot be probed. |
+
+**There is no mailer.** Stage 1 is internal: the admin copies the link into a
+DM. Same flow, no provider dependency.
+
+**The invitee cannot choose their own email** — it comes from the invite. A link
+that let you pick would be transferable to anyone.
+
+An invite is hashed at rest, lives 7 days, and is **burned only once a passkey
+exists**. Consuming it at the start would turn a dismissed browser prompt — the
+most common way enrolment fails — into a support request; instead the same link
+reopens onto the same half-made account.
+
+### Bootstrapping
+
+An invite needs an admin, and a fresh deployment has none. On the box:
+
+```bash
+EMAIL=you@example.com ROLE=admin pnpm invite
+```
+
+The first invite **must** be `ROLE=admin`; a member invite into an empty
+workspace produces somebody who can sign in and invite nobody.
+
+Requiring shell access is the point. "First registration becomes admin" is a
+race on a public origin, and a bootstrap token in the environment is the same
+secret as SSH with an extra copy to leak.
+
+**An identity is not relay access.** The relay runs closed, so a newly enrolled
+person cannot publish their profile until an operator admits their pubkey —
+Buzz owns admission and Estiva ID only observes it (PEEK-36).
 
 ## Profile
 

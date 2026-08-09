@@ -40,7 +40,14 @@ import {
   recordCredentialUse,
   revokeCredential,
 } from '../../domain/credentials.js'
+import {
+  type InviteRejection,
+  claimInvite,
+  consumeInviteForUser,
+  findInvite,
+} from '../../domain/invites.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { saveProfile } from '../../domain/profile.js'
 import {
   SESSION_COOKIE,
   createSession,
@@ -52,9 +59,28 @@ import { badRequest, conflict, forbidden, notFound, unauthenticated } from '../.
 import type { AppEnv } from '../app.js'
 import { requireSession } from '../middleware/session.js'
 
+/**
+ * Why an invite was refused, in words the person holding the link can act on.
+ *
+ * Distinguishing the three is deliberate: "already used" and "expired" have
+ * different fixes, and telling somebody their link is simply wrong when it has
+ * in fact expired sends them looking for a typo.
+ */
+function inviteRefusal(reason: InviteRejection): string {
+  if (reason === 'expired') return 'That invite has expired. Ask for a new one.'
+  if (reason === 'consumed') return 'That invite has already been used. Sign in instead.'
+  return 'That invite link is not valid.'
+}
+
+/**
+ * Enrolment takes an invite, not an email (PEEK-65).
+ *
+ * The email and display name come from the invite the admin filled in, so an
+ * invitee cannot quietly enrol as somebody else — a link that let you choose
+ * your own address would be transferable to anyone.
+ */
 const registerSchema = z.object({
-  email: z.string().email(),
-  displayName: z.string().min(1).max(120).optional(),
+  inviteToken: z.string().min(1),
 })
 
 /**
@@ -95,18 +121,35 @@ export function authRoutes(): Hono<AppEnv> {
 
   routes.post('/auth/register/options', async (c) => {
     const body = registerSchema.safeParse(await c.req.json().catch(() => ({})))
-    if (!body.success) throw badRequest('email is required', { issues: body.error.issues })
+    if (!body.success) throw badRequest('An invite is required to enrol')
 
-    const existing = await findUserByEmail(body.data.email)
+    // The gate. Registration was open until PEEK-65, which was survivable only
+    // because a caller had to know the API — and the registration screen
+    // removes exactly that barrier, so the two ship together.
+    const lookup = await findInvite(body.data.inviteToken)
+    if (!lookup.ok) throw forbidden(inviteRefusal(lookup.reason))
+    const invite = lookup.invite
+
+    const existing = await findUserByEmail(invite.email)
     if (existing && (await countActiveCredentials(existing.id)) > 0) {
       throw conflict('That email is already registered. Sign in instead.')
     }
 
     // Reuse an account whose enrolment was abandoned, rather than stranding the
-    // address on a user row that can never be signed into.
+    // address on a user row that can never be signed into. With invites this is
+    // the ordinary path: dismissing the passkey prompt is the most common way
+    // enrolment fails, and reopening the same link has to work.
     const user =
       existing ??
-      (await createUserWithKey({ email: body.data.email, displayName: body.data.displayName }))
+      (await createUserWithKey({
+        email: invite.email,
+        displayName: invite.displayName ?? undefined,
+        role: invite.role,
+      }))
+
+    // Bound before enrolment can succeed, so /verify knows which invite to burn
+    // and a retry lands on the same account.
+    await claimInvite(invite.id, user.id)
 
     const options = await generateRegistrationOptions({
       rpName: cfg.RP_NAME,
@@ -163,6 +206,37 @@ export function authRoutes(): Hono<AppEnv> {
       backedUp: info.credentialBackedUp,
       deviceType: info.credentialDeviceType,
     })
+
+    // Burned only now: a passkey exists, so the link has done its job. An
+    // enrolment abandoned at the browser prompt leaves the invite live and the
+    // person can reopen it.
+    //
+    // Returns undefined when this was a *second* device being enrolled rather
+    // than a first — that path shares this route and has no invite.
+    const consumed = await consumeInviteForUser(claimed.userId)
+
+    // The handle the admin reserved. Stored, not published: the relay runs
+    // closed, so publishing would fail until the pubkey is admitted (PEEK-36),
+    // and reporting that failure during sign-up would be noise. The account
+    // page publishes on the next save.
+    if (consumed?.handle) {
+      try {
+        await saveProfile(claimed.userId, { handle: consumed.handle })
+      } catch (error) {
+        // Never fail enrolment over this: a passkey now exists, and refusing
+        // here would strand an account somebody can already authenticate to.
+        //
+        // Logged rather than swallowed, because the two reasons differ sharply.
+        // A handle taken between invite and enrolment is ordinary and the
+        // person fixes it on their account page. An unset `COMMUNITY_HOST`
+        // means *no* handle can ever be assigned — a deployment fault that
+        // would otherwise be completely invisible.
+        c.get('log').warn(
+          { err: error, userId: claimed.userId, handle: consumed.handle },
+          'could not claim the invited handle',
+        )
+      }
+    }
 
     const [pubkey, { token }] = await Promise.all([
       getActivePubkey(claimed.userId),
