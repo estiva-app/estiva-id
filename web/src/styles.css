@@ -443,3 +443,21 @@ select {
   border-radius: 6px;
   color: var(--text);
 }
+
+/*
+ * The command an operator still has to run (PEEK-66).
+ *
+ * Sized to be selected and copied rather than skimmed — it is the one piece of
+ * text on the page whose value is that somebody takes it elsewhere.
+ */
+code.command {
+  display: block;
+  flex: 1 1 20rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}

@@ -183,6 +183,25 @@ export async function revokeCredential(userId: string, credentialRowId: string):
 }
 
 /**
+ * Revoke every passkey a person holds (PEEK-66).
+ *
+ * Not scoped by user in the way {@link revokeCredential} is, because the caller
+ * is an admin acting *on* somebody rather than a person acting on themselves —
+ * and deliberately without the last-passkey rule, which exists to stop someone
+ * locking themselves out. Locking them out is the entire intent here.
+ *
+ * Revoked rather than deleted, like everything else on this path: the rows are
+ * what makes an offboarding auditable afterwards.
+ */
+export async function revokeAllCredentials(userId: string): Promise<number> {
+  const result = await query(
+    'update webauthn_credentials set revoked_at = now() where user_id = $1 and revoked_at is null',
+    [userId],
+  )
+  return result.rowCount ?? 0
+}
+
+/**
  * Record a successful authentication.
  *
  * A counter that fails to advance is how a cloned authenticator shows itself.

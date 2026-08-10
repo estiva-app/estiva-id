@@ -45,6 +45,11 @@ import type { User } from './users.js'
  * user row and a custodied key exist, and then the browser prompt was dismissed.
  * They own a pubkey and cannot sign in. It looks like nothing from every other
  * angle, which is why it is named.
+ *
+ * **It means "never had a passkey", not "has no passkey now."** Offboarding
+ * revokes every credential (PEEK-66), so deriving this from the *live* count
+ * labelled every leaver "never signed in" — which is false, and falsest exactly
+ * where it matters: on the screen an admin checks after removing somebody.
  */
 export type Enrolment = 'invited' | 'enrolling' | 'enrolled'
 
@@ -83,6 +88,7 @@ interface PersonRow {
   handle: string | null
   pubkey: string | null
   passkey_count: string
+  ever_enrolled: boolean
   last_seen_at: Date | null
   created_at: Date
 }
@@ -108,6 +114,9 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
             (select count(*)
                from webauthn_credentials c
               where c.user_id = u.id and c.revoked_at is null)::text as passkey_count,
+            -- Revoked ones included: this answers "did they ever enrol", which
+            -- offboarding must not be able to rewrite.
+            exists (select 1 from webauthn_credentials c where c.user_id = u.id) as ever_enrolled,
             (select max(s.last_seen_at)
                from sessions s
               where s.user_id = u.id) as last_seen_at,
@@ -152,7 +161,7 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
     pubkey: row.pubkey,
     role: row.role,
     status: row.status,
-    enrolment: Number(row.passkey_count) > 0 ? 'enrolled' : 'enrolling',
+    enrolment: row.ever_enrolled ? 'enrolled' : 'enrolling',
     passkeyCount: Number(row.passkey_count),
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -276,6 +285,9 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
             (select count(*)
                from webauthn_credentials c
               where c.user_id = u.id and c.revoked_at is null)::text as passkey_count,
+            -- Revoked ones included: this answers "did they ever enrol", which
+            -- offboarding must not be able to rewrite.
+            exists (select 1 from webauthn_credentials c where c.user_id = u.id) as ever_enrolled,
             (select max(s.last_seen_at)
                from sessions s
               where s.user_id = u.id) as last_seen_at,
@@ -298,7 +310,7 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
     pubkey: row.pubkey,
     role: row.role,
     status: row.status,
-    enrolment: Number(row.passkey_count) > 0 ? 'enrolled' : 'enrolling',
+    enrolment: row.ever_enrolled ? 'enrolled' : 'enrolling',
     passkeyCount: Number(row.passkey_count),
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
