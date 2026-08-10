@@ -44,9 +44,29 @@ export const SEED_APPS: readonly SeedApp[] = [
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
-  {
-    clientId: 'linear-lite',
-    name: 'Estiva Ship (linear-lite)',
+  ...shipCredentials(),
+]
+
+/**
+ * Ship, under both names, while it changes its own (PEEK-98).
+ *
+ * `client_id` is a contract, not a label: it is what Ship sends to `/authorize`
+ * and `/token`, the unique key of `app_credentials`, and the target of
+ * `authorization_codes.client_id`. So renaming it is a migration across two
+ * repos and a database, not a string edit — and doing it in one step breaks
+ * every Ship sign-in for as long as the two sides disagree.
+ *
+ * Seeding **both** names with identical policy removes the ordering problem
+ * entirely: this service accepts either, so Ship can flip whenever it deploys
+ * and nothing has to happen in a particular minute. `linear-lite` goes away in
+ * phase 3, once no build in the wild still sends it.
+ *
+ * Deriving both from one definition is the point — two hand-maintained copies
+ * would drift, and the failure that causes is an app that can sign under one of
+ * its names and not the other, which reads as an intermittent bug.
+ */
+function shipCredentials(): SeedApp[] {
+  const ship: Omit<SeedApp, 'clientId' | 'name'> = {
     // PEEK-71: 30850, 30851, 1851, 9, 5, 31989 — plus 27235, as above.
     //
     // 9007 is the Folder, and it was missing. Ship's own `kinds.ts` calls it
@@ -63,8 +83,15 @@ export const SEED_APPS: readonly SeedApp[] = [
     allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
-  },
-]
+  }
+
+  return [
+    { clientId: 'estiva-ship', name: 'Estiva Ship', ...ship },
+    // Retired in phase 3 of PEEK-98. Until then a Ship build that predates the
+    // rename keeps working, which is the whole point of seeding both.
+    { clientId: 'linear-lite', name: 'Estiva Ship (linear-lite, retiring)', ...ship },
+  ]
+}
 
 export async function seedApps(): Promise<void> {
   for (const app of SEED_APPS) {
