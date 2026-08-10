@@ -186,8 +186,20 @@ Stage 4. Conflating the two would force client-side signing now.
 
 ## 8. Deliberately not built yet
 
-The private directory API, role and service identities, any *write* to Buzz's
-admission API, and recovery flows.
+Role and service identities, any *write* to Buzz's admission API, and recovery
+flows.
+
+**The private directory landed on 2026-08-10** (PEEK-30). `POST
+/directory/lookup` and `GET /directory/:pubkey` answer a bearer-authenticated
+app with a colleague's name, email, role and status — **by pubkey only, never as
+a list**, so a token scoped to one app cannot export the staff directory.
+
+It is the second half of a deliberate split, and the half that keeps the first
+one honest: `kind:0` carries what the world may see, this carries what it may
+not. An email on a shared relay cannot be taken back, and Nostr's slot for a
+public identifier is `nip05` — so the requirement "show a colleague's name,
+email and avatar" is met by two channels joined on the pubkey rather than by
+widening the profile event.
 
 **Avatars moved to the relay's Blossom store on 2026-08-10** (PEEK-32).
 `PUT /me/avatar` uploads with the custodied key and publishes a

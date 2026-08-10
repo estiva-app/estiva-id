@@ -126,7 +126,65 @@ The response reports publishing separately from saving:
 and the relay is a projection of it, so a relay outage leaves `published: false`
 with a `publishError` and the edit intact — it does not roll the edit back.
 
-## The directory
+## The private directory
+
+Two channels, keyed the same way (PEEK-30). A person's public face is a `kind:0`
+on the relay — `display_name`, `picture`, `nip05` — readable by anyone, including
+apps nobody here wrote. Their **email is not there and never will be**: a private
+contact address on a shared relay is unretractable, and Nostr's slot for a public
+identifier is `nip05`, not email.
+
+So "show me a colleague's name, email and avatar" is answered from two places
+joined on the pubkey. That split is why this exists next to the profile rather
+than inside it.
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/directory/lookup` | Bearer JWT | Body `{ pubkeys: string[] }`, at most 200. |
+| `GET` | `/directory/:pubkey` | Bearer JWT | One person. `404` if nobody holds that key. |
+
+```json
+{ "contacts": [ { "pubkey": "…", "displayName": "Grace Hopper",
+                  "email": "grace@…", "role": "member", "status": "active" } ] }
+```
+
+**Lookup, never listing.** There is no endpoint that returns everybody. A caller
+has to know the pubkey it is asking about, which it does because it read it off
+an event it could already see — so a token scoped to one app is not a way to
+export the staff directory. That view exists for admins at `/admin/people`.
+
+Unknown pubkeys are **absent from the result**, not returned as nulls. An
+explicit "no such person" for every key an app has ever seen would make this a
+way to test which keys are members.
+
+**The caller must still be active.** Tokens live 600s and a leaver holds one
+until it expires, so the subject is re-checked here — otherwise the directory
+stays readable for ten minutes after an offboarding.
+
+`status` is included so an app can tell a current colleague from a former one. A
+leaver's name and email still resolve, because their old messages have to keep
+rendering as written by a person.
+
+Batch exists because the caller is an app rendering a thread with a dozen
+authors, over a **preflighted cross-origin request**. A per-pubkey endpoint would
+make the obvious implementation a dozen round trips, each with its own OPTIONS.
+
+### Cross-origin
+
+Both routes send CORS headers, from the same allowlist as `/token` — the
+registered redirect URIs, so there is one list rather than two that drift. The
+shared rules live in `src/http/cors.ts`.
+
+**`Access-Control-Allow-Credentials` is never sent**, which is what keeps this
+safe: a browser will not attach the session cookie cross-origin nor expose a
+credentialed response, so cookie-authenticated routes stay same-origin-only while
+this bearer-authenticated one works from anywhere registered.
+
+In-process tests cannot verify any of that — nothing enforces CORS when a Hono
+app is called in the same process, which is how PEEK-90 shipped green tests and
+a feature that could not work. This is checked in a browser across two origins.
+
+## The admin directory
 
 Admin only, and read-only (PEEK-64). Nothing here writes; the mutations an admin
 will want are their own tickets (PEEK-66 offboarding, PEEK-34 role identities),

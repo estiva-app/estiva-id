@@ -36,13 +36,14 @@ import { z } from 'zod'
 import { config } from '../../config.js'
 import { findAppPolicy } from '../../domain/apps.js'
 import { recordAudit } from '../../domain/audit.js'
-import { isRegisteredRedirectOrigin, redeemAuthorizationCode } from '../../domain/authorization.js'
+import { redeemAuthorizationCode } from '../../domain/authorization.js'
 import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { allowOrigin, preflight } from '../cors.js'
 
 const sessionGrantSchema = z.object({ clientId: z.string().min(1) })
 
@@ -81,40 +82,15 @@ export function tokenRoutes(): Hono<AppEnv> {
   })
 
   /**
-   * CORS for `/token`, and only for `/token`.
-   *
    * The code grant is used by a **public client in a browser on another
    * origin**, so the browser has to be allowed to read the response. Without
    * this the redirect completes, the code comes back, and the exchange dies at
    * the preflight — which is exactly what happened the first time Ship tried it.
    *
-   * **`Access-Control-Allow-Credentials` is never sent**, and that is the whole
-   * safety argument. Without it the browser will not attach the session cookie
-   * cross-origin nor expose a response to a credentialed request, so the
-   * *session* grant stays same-origin-only while the code grant works. The
-   * credentials for the code grant are the code and the PKCE verifier, which
-   * the caller already holds — no ambient authority is being shared.
-   *
-   * Allowed origins come from the registered redirect URIs, so there is one
-   * allowlist rather than two that can drift apart.
+   * The rules, and why the session grant stays same-origin-only regardless, are
+   * in `http/cors.ts`.
    */
-  const allowOrigin = async (c: Context<AppEnv>): Promise<boolean> => {
-    const origin = c.req.header('origin')
-    if (!origin || !(await isRegisteredRedirectOrigin(origin))) return false
-    c.header('access-control-allow-origin', origin)
-    // The response varies by Origin, so a cache must not serve one origin's
-    // answer to another.
-    c.header('vary', 'Origin')
-    return true
-  }
-
-  routes.options('/token', async (c) => {
-    if (!(await allowOrigin(c))) return c.body(null, 403)
-    c.header('access-control-allow-methods', 'POST, OPTIONS')
-    c.header('access-control-allow-headers', 'content-type')
-    c.header('access-control-max-age', '600')
-    return c.body(null, 204)
-  })
+  routes.options('/token', preflight('POST, OPTIONS', 'content-type'))
 
   /**
    * The grant is chosen by the body, not by a separate route, so relying

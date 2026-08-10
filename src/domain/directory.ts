@@ -186,6 +186,76 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
 }
 
 /**
+ * What one member may learn about another (PEEK-30).
+ *
+ * The private half of a person. Deliberately *not* what the admin list returns:
+ * no passkey counts, no last-seen, no enrolment state, no admission — those
+ * describe how somebody's account is doing, which is an admin's business and
+ * nobody else's.
+ *
+ * `status` is here because an app that cannot tell a current colleague from a
+ * former one will render a leaver as an ordinary member forever, and this
+ * service's whole position on offboarding is that a mismatch should be visible
+ * rather than silent. Their name and email still resolve, because their old
+ * messages have to keep rendering as written by a person.
+ */
+export interface DirectoryContact {
+  pubkey: string
+  displayName: string | null
+  /**
+   * **Never published to a relay, and never in a `kind:0`.** A private contact
+   * address on a shared relay is unretractable; Nostr's slot for a public
+   * identifier is `nip05`. That split is the point of this endpoint existing
+   * alongside the profile rather than inside it.
+   */
+  email: string | null
+  role: User['role']
+  status: User['status']
+}
+
+/**
+ * Look people up by pubkey.
+ *
+ * **By pubkey, and only by pubkey — there is no way to list.** A caller has to
+ * already know who it is asking about, which it does because it read the pubkey
+ * off an event it could already see. That is what keeps a token scoped to one
+ * app from being a way to export the staff directory.
+ *
+ * Batch, because the caller is an app rendering a thread with a dozen authors
+ * and the round trip is cross-origin. A per-pubkey endpoint would make the
+ * obvious implementation a dozen preflighted requests.
+ *
+ * Unknown pubkeys are simply absent from the result. There is nothing to say
+ * about them, and an explicit "no such person" for every key an app has ever
+ * seen would turn this into a way to test which keys are members.
+ */
+export async function lookupContacts(pubkeys: readonly string[]): Promise<DirectoryContact[]> {
+  if (pubkeys.length === 0) return []
+
+  const result = await query<{
+    pubkey: string
+    display_name: string | null
+    email: string | null
+    role: User['role']
+    status: User['status']
+  }>(
+    `select k.pubkey, u.display_name, u.email, u.role, u.status
+       from user_keys k
+       join users u on u.id = k.user_id
+      where k.status = 'active' and k.pubkey = any($1::text[])`,
+    [pubkeys],
+  )
+
+  return result.rows.map((row) => ({
+    pubkey: row.pubkey,
+    displayName: row.display_name,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+  }))
+}
+
+/**
  * One person, by user id.
  *
  * Invites are deliberately not addressable here. There is nothing to open — an
