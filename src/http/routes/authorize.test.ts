@@ -285,3 +285,75 @@ describe('discovery', () => {
     expect(document.code_challenge_methods_supported).toEqual(['S256'])
   })
 })
+
+/**
+ * CORS on `/token`, which the code grant cannot work without.
+ *
+ * The first cross-origin attempt died at the preflight: the redirect completed,
+ * the code came back, and the browser refused to let the app read the token.
+ * PKCE removes the need for the *cookie* to cross origins, not the need for the
+ * response to be readable.
+ *
+ * The safety argument is the absent header rather than a present one — without
+ * `Access-Control-Allow-Credentials` a browser will neither attach the session
+ * cookie cross-origin nor expose a credentialed response, so the session grant
+ * stays same-origin while the code grant works.
+ */
+describe('CORS on /token', () => {
+  const ORIGIN = 'https://ship.test'
+
+  it('lets a registered origin preflight', async () => {
+    const response = await app.request('/token', {
+      method: 'OPTIONS',
+      headers: { origin: ORIGIN, 'access-control-request-method': 'POST' },
+    })
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    expect(response.headers.get('vary')).toBe('Origin')
+  })
+
+  // The header that would let another origin ride the session cookie.
+  it('never allows credentials', async () => {
+    const response = await app.request('/token', {
+      method: 'OPTIONS',
+      headers: { origin: ORIGIN, 'access-control-request-method': 'POST' },
+    })
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull()
+  })
+
+  it('refuses an origin that is not a registered redirect target', async () => {
+    const response = await app.request('/token', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://attacker.test', 'access-control-request-method': 'POST' },
+    })
+    expect(response.status).toBe(403)
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  // `https://ship.test` must not authorise `https://ship.test.attacker.example`.
+  it('does not let a prefix of a registered origin through', async () => {
+    const response = await app.request('/token', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://ship.test.attacker.example',
+        'access-control-request-method': 'POST',
+      },
+    })
+    expect(response.status).toBe(403)
+  })
+
+  it('echoes the origin on a real exchange', async () => {
+    const response = await app.request('/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({
+        grantType: 'authorization_code',
+        code: 'nope',
+        clientId: CLIENT,
+        redirectUri: REDIRECT,
+        codeVerifier: 'x'.repeat(43),
+      }),
+    })
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+  })
+})

@@ -159,6 +159,26 @@ export async function purgeDeadAuthorizationCodes(olderThanHours = 24): Promise<
   return result.rowCount ?? 0
 }
 
+/**
+ * Whether any registered redirect URI lives on this origin.
+ *
+ * Governs CORS on `/token` — see the middleware. Deriving it from the redirect
+ * allowlist rather than a second setting means there is one place that says
+ * which origins this service will talk to, and it cannot drift.
+ */
+export async function isRegisteredRedirectOrigin(origin: string): Promise<boolean> {
+  const row = await queryOne<{ ok: boolean }>(
+    `select exists (
+       select 1 from app_credentials, unnest(redirect_uris) as uri
+        where status = 'active' and uri like $1
+     ) as ok`,
+    // Anchored with the separator so `https://app.test` cannot match
+    // `https://app.test.attacker.example/cb`.
+    [`${origin}/%`],
+  )
+  return row?.ok === true
+}
+
 /** Whether an app may be redirected to this exact URI. */
 export async function isRegisteredRedirectUri(
   clientId: string,
