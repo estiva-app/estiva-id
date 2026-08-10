@@ -136,6 +136,39 @@ and without it every signing request is refused as an unknown app:
 docker compose run --rm -T estiva-id node dist/db/seed.js
 ```
 
+## Changing an app's policy afterwards — the order matters
+
+`src/db/seed.ts` feeds the database and nothing else. `/authorize`, `/token` and
+`/sign` all read `app_credentials`, so **merging a change to that file does
+nothing on its own** — however many times the image redeploys.
+
+Re-seed to apply it. But re-seed *after* the box has pulled, because
+`dist/db/seed.js` runs **out of the deployed image**: run it too early and it
+writes the previous values back and exits 0. It is not a harmless no-op — a
+premature re-seed looks exactly like a successful one.
+
+```
+merge → wait for the pull (the timer runs every 2 min) → re-seed → verify
+```
+
+The verify step is not optional; every failure mode here is silent.
+
+```bash
+docker exec estiva-id-postgres-1 psql -U estiva_id -d estiva_id -t -A -F'|' \
+  -c "select client_id, allowed_kinds from app_credentials order by client_id;"
+```
+
+This cost real time on 2026-08-10, twice in one evening: a kind was added to an
+app's allowlist, and a second `client_id` was added for a rename, and both were
+merged, believed deployed, and absent from the database. The app went on failing
+in exactly the way the fix addressed.
+
+**A client-side change has a second delay on top.** Ship's `bundle.js` is served
+`max-age=14400`, so a browser that already loaded the app keeps the old one for
+up to four hours. Anything that removes what an old bundle still sends — an app
+credential, a redirect URI — has to wait that out, or those sessions break in a
+way only a hard reload fixes.
+
 ### 6. Verify through the tunnel
 
 ```bash
