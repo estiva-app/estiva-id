@@ -399,6 +399,10 @@ export function authRoutes(): Hono<AppEnv> {
       email: user.email,
       displayName: user.display_name,
       status: user.status,
+      // What they may do while active. The account page shows the way into the
+      // admin console from this, so a member is never offered a door that
+      // answers 403 — the check that matters still happens on the server.
+      role: user.role,
       pubkey,
     })
   })

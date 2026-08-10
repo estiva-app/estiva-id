@@ -1,11 +1,13 @@
 /**
- * Your account (PEEK-68).
+ * Your account (PEEK-68), and the way through to the admin console (PEEK-64).
  *
- * Deliberately one page. The admin console is a separate surface (PEEK-64) and
- * this is the self-serve half — the things a person can do without asking
- * anyone: change how they appear, add a device, drop one they have lost.
+ * Two surfaces, kept apart. This is the self-serve half — the things a person
+ * can do without asking anyone: change how they appear, add a device, drop one
+ * they have lost. `/admin` is the other half, and answers a different question:
+ * who is in this workspace, and is any of them half set up.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AdminPeople, AdminPerson } from './AdminPeople'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
 import { SignIn } from './SignIn'
@@ -51,8 +53,34 @@ function safeNext(): string | null {
   return next
 }
 
+/**
+ * Where we are, from the address bar.
+ *
+ * No router library for three screens. Real paths rather than in-page state
+ * because an admin looking at a person should be able to send that URL to
+ * somebody — and the server already serves the app shell for any HTML GET, so a
+ * deep link lands correctly on a cold load.
+ */
+function useRoute(): [string, (path: string) => void] {
+  const [path, setPath] = useState(window.location.pathname)
+
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  const navigate = useCallback((next: string) => {
+    window.history.pushState({}, '', next)
+    setPath(next)
+  }, [])
+
+  return [path, navigate]
+}
+
 export function App() {
   const [state, setState] = useState<State>({ kind: 'loading' })
+  const [path, navigate] = useRoute()
 
   const load = useCallback(async () => {
     try {
@@ -117,20 +145,76 @@ export function App() {
 
   const { me, profile, credentials } = state
 
+  const signOut = (
+    <button
+      type="button"
+      className="link"
+      onClick={async () => {
+        await logout()
+        setState({ kind: 'signed-out' })
+      }}
+    >
+      Sign out
+    </button>
+  )
+
+  if (path.startsWith('/admin')) {
+    /*
+      A member who types the URL is told plainly rather than shown an empty
+      screen. This is presentation only — `/admin/people` refuses them on the
+      server, which is the check that counts.
+    */
+    if (me.role !== 'admin') {
+      return (
+        <div className="page">
+          <header className="page-head">
+            <h1>Admin</h1>
+            <button type="button" className="link" onClick={() => navigate('/')}>
+              Your account
+            </button>
+          </header>
+          <div className="notice warn">
+            You need to be an admin to see who is in this workspace.
+          </div>
+        </div>
+      )
+    }
+
+    const personId = path.slice('/admin/'.length)
+
+    return (
+      <div className="page">
+        <header className="page-head">
+          <h1>Everyone in this workspace</h1>
+          <div className="row">
+            <button type="button" className="link" onClick={() => navigate('/')}>
+              Your account
+            </button>
+            {signOut}
+          </div>
+        </header>
+
+        {personId ? (
+          <AdminPerson id={personId} onBack={() => navigate('/admin')} />
+        ) : (
+          <AdminPeople onOpen={(id) => navigate(`/admin/${id}`)} />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <header className="page-head">
         <h1>Your account</h1>
-        <button
-          type="button"
-          className="link"
-          onClick={async () => {
-            await logout()
-            setState({ kind: 'signed-out' })
-          }}
-        >
-          Sign out
-        </button>
+        <div className="row">
+          {me.role === 'admin' && (
+            <button type="button" className="link" onClick={() => navigate('/admin')}>
+              Admin
+            </button>
+          )}
+          {signOut}
+        </div>
       </header>
 
       {/*

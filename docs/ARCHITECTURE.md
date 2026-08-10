@@ -186,9 +186,22 @@ Stage 4. Conflating the two would force client-side signing now.
 
 ## 8. Deliberately not built yet
 
-Admin UI, **any** user interface at all, the private directory, Blossom
-avatars, invites, role and service identities, any call to Buzz's admission
-API, and recovery flows.
+The private directory API, Blossom avatars, role and service identities, any
+*write* to Buzz's admission API, and recovery flows.
+
+Four entries left this list on 2026-08-10. **A user interface exists** — the
+account page (PEEK-68) and the enrolment screen it ships with — **invites** are
+built and are now the only way in (PEEK-65), and the **admin console has its
+first screen**: the people list (PEEK-64).
+
+That list is also where admission stopped being absent and started being
+*observed*. `src/domain/admission.ts` is the read-only port PEEK-36 specified,
+and it answers `unknown` for everybody, because the relay exposes no way to read
+membership and the only alternative would be reaching into Buzz's database.
+Displaying that honestly is the point: this service's view of a person and the
+relay's view now sit on one row, so a half-offboarded person — gone here, still
+admitted there — is visible rather than silent. Driving admission, rather than
+watching it, remains PEEK-66's job.
 
 Two entries left this list on 2026-08-07 (PEEK-31):
 

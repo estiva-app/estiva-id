@@ -281,3 +281,96 @@ ul.credentials li:first-child {
   max-width: 30rem;
   padding-top: 4rem;
 }
+
+/*
+ * The people list (PEEK-64).
+ *
+ * The visual job is the same one the account page has, pointed at a different
+ * question: make a person who is *not* fully set up impossible to skim past.
+ * Chips carry that, so they are sized to be read rather than decorative — and
+ * an ordinary "active" state is drawn with no chip at all, because a row of
+ * green on everyone is how the one amber chip stops being seen.
+ */
+ul.people {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+ul.people li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+ul.people li:first-child {
+  border-top: none;
+}
+
+.person-main {
+  min-width: 12rem;
+  flex: 1 1 16rem;
+}
+
+.person-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.person-states {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.chip {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentcolor;
+  white-space: nowrap;
+  /*
+   * No text-transform. The label is read as a sentence fragment ("Never signed
+   * in"), and uppercasing it costs legibility on the states that matter most.
+   */
+}
+
+.chip.ok {
+  color: var(--published);
+}
+
+.chip.warn {
+  color: var(--warn);
+}
+
+.chip.danger {
+  color: var(--danger);
+}
+
+.chip.pending {
+  color: var(--accent);
+}
+
+/* "Not known" is not a warning. It is the absence of one. */
+.chip.muted {
+  color: var(--text-dim);
+}
+
+.badge.role {
+  color: var(--accent);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--surface-raised);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}

@@ -224,16 +224,37 @@ redesigning a surface.
 **The intended end state is still one-action onboarding and offboarding.** This
 is a staged route to it, not a rejection of it.
 
-### Still to implement
+### Implemented on 2026-08-10, with the people list (PEEK-64)
 
-Nothing yet — there is no consumer until the admin surface exists, and building
-the port before then would be a speculative abstraction. When the people list is
-built, it needs:
+* ~~A read-only admission port: `getAdmissionStatus(pubkey) → admitted | not-admitted | unknown`~~
+  — `src/domain/admission.ts`, plus a batch form so a real implementation is not
+  N+1 across a page of people.
+* ~~`unknown` as an honest state, shown as such~~ — rendered "Relay: Not known"
+  in a muted chip, with the detail view naming `buzz-admin list-members` as
+  where the real answer lives.
+* ~~Per-person display of identity **and** admission~~ — one row carries account
+  status, enrolment and admission, and an ordinary `active` draws no chip at all,
+  so the one amber chip on the row that matters is not lost in a wall of green.
 
-* A read-only admission port: `getAdmissionStatus(pubkey) → admitted | not-admitted | unknown`.
-* `unknown` as an honest state, shown as such. Never inferred as "probably fine".
-* Per-person display of identity **and** admission, so a mismatch is visible
-  without anyone going looking.
+**And a finding that hardens this decision rather than softening it: `unknown`
+is not a default, it is the only reachable answer.** The relay's HTTP surface has
+no membership read endpoint — `crates/buzz-relay/src/router.rs` exposes the
+bridge, media, NIP-05 and a moderation API covering reports and feedback, and
+nothing else. `buzz-admin list-members` is a CLI that opens Buzz's Postgres
+directly (`connect_db()` in `crates/buzz-admin/src/main.rs`).
+
+So Estiva ID could only answer this by connecting to another service's database,
+which is exactly the coupling §3 of [ARCHITECTURE.md](ARCHITECTURE.md) exists to
+refuse — and it would be the first thing to unpick when workspaces get dedicated
+deployments. Observing admission properly therefore needs *Buzz* to grow a read
+endpoint. Until it does, the honest display is the whole of the mitigation.
+
+A third enrolment dimension came out of building this and is worth recording,
+because it is a state neither system named before: **`enrolling`** — the invite
+was opened, a user row and a custodied key exist, and the passkey prompt was
+dismissed. That person owns a pubkey and cannot sign in. It is the commonest way
+enrolment fails, it is invisible from every other angle, and it is now on the
+list as "Never signed in".
 
 `users.status` (`active` / `suspended` / `offboarded`) describes only *this
 service's* view and deliberately does not claim to represent relay admission.

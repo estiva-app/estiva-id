@@ -40,7 +40,7 @@ Two authentication modes:
 | `POST` | `/auth/login/verify` | — | Body is the WebAuthn assertion. Sets the session cookie. |
 | `POST` | `/auth/credentials/options` | Session | Enrol **another** passkey on an existing account. Verify with `/auth/register/verify`. |
 | `POST` | `/auth/logout` | Session | Revokes the session. |
-| `GET` | `/me` | Session | `{ id, email, displayName, status, pubkey }`. |
+| `GET` | `/me` | Session | `{ id, email, displayName, status, role, pubkey }`. |
 | `GET` | `/me/credentials` | Session | Summaries only — no public keys, no raw credential ids. |
 | `DELETE` | `/me/credentials/:id` | Session | `404` if not yours. `409` if it is your only passkey. |
 
@@ -124,6 +124,52 @@ The response reports publishing separately from saving:
 **A save that could not be published still succeeded.** Postgres is the record
 and the relay is a projection of it, so a relay outage leaves `published: false`
 with a `publishError` and the edit intact — it does not roll the edit back.
+
+## The directory
+
+Admin only, and read-only (PEEK-64). Nothing here writes; the mutations an admin
+will want are their own tickets (PEEK-66 offboarding, PEEK-34 role identities),
+and shipping them alongside the screen that first makes the state legible would
+mean shipping them before anyone had looked at what the state is.
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/admin/people` | Session, **admin** | Everyone with an account, plus invites nobody has opened. |
+| `GET` | `/admin/people/:id` | Session, **admin** | One person plus their passkey summaries. `404` for an unknown id **and** for an invite id. |
+
+A stranger gets `401`, not `403` — a `403` would confirm the route exists to
+somebody with no session. Status is checked before role, so an admin who has been
+offboarded loses this immediately rather than when their session expires.
+
+### Three dimensions, never collapsed
+
+A person is not one status, and the whole value of the list is that these can
+disagree:
+
+| Field | Owner | Values |
+| --- | --- | --- |
+| `status` | this service | `active` · `suspended` · `offboarded` · `null` for an invite |
+| `enrolment` | this service, derived | `invited` · `enrolling` · `enrolled` |
+| `admission` | the Buzz relay | `admitted` · `not-admitted` · `unknown` |
+
+`enrolling` is the expensive state: the invite was opened, a user row and a
+custodied key exist, and the passkey prompt was dismissed. They own a pubkey and
+cannot sign in, and nothing else in either system says so.
+
+**`admission` is `unknown` today, always, and that is not a stub.** Buzz owns
+admission and exposes no way to read it — the relay's HTTP surface has the
+bridge, media, NIP-05 and a moderation API, and `buzz-admin list-members` is a
+CLI against Buzz's own Postgres. Answering it would mean this service connecting
+to another service's database, which is the coupling the suite exists to argue
+against. So it is displayed as "not known" and never inferred as "probably
+fine" — the one reading that would make a half-offboarded person look admitted.
+The port is `src/domain/admission.ts`; a real implementation is a second class,
+not a new seam.
+
+An unopened invite appears on the list and is deliberately **not** addressable at
+`/admin/people/:id`: there is no account to open, and everything known about it
+is already on the row. Once somebody opens their link they have a user row, and
+they stop appearing as an invite so nobody is listed twice.
 
 ## Tokens and discovery
 
