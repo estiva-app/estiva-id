@@ -15,10 +15,14 @@
  * might want still live as domain functions with their own tickets.
  */
 import { Hono } from 'hono'
+import { config } from '../../config.js'
 import { auditActions, effectiveLimit, listAudit } from '../../domain/audit-log.js'
+import { recordAudit } from '../../domain/audit.js'
 import { listCredentialSummaries } from '../../domain/credentials.js'
 import { getDirectoryEntry, listDirectory } from '../../domain/directory.js'
+import { getActivePubkey } from '../../domain/keys.js'
 import { AlreadyOffboarded, NoSuchPerson, offboardPerson } from '../../domain/offboarding.js'
+import { RecoveryRefused, createRecovery } from '../../domain/recovery.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { adminOnly } from '../middleware/admin.js'
@@ -113,6 +117,68 @@ export function adminRoutes(): Hono<AppEnv> {
       if (error instanceof NoSuchPerson) throw notFound('No such person')
       if (error instanceof AlreadyOffboarded) {
         throw conflict('That identity is already offboarded', { reason: 'already_offboarded' })
+      }
+      throw error
+    }
+  })
+
+  /**
+   * Issue a recovery link for somebody with no working passkey (PEEK-67).
+   *
+   * The link is returned once and never stored, so an admin who loses it issues
+   * another — which supersedes the first, rather than leaving two live.
+   *
+   * **Self-service is refused.** An admin with a session can already add a
+   * device from their own account page, so asking for a link for yourself means
+   * either a misunderstanding or somebody with a stolen session widening their
+   * foothold. The genuine case — the last admin locked out — cannot be solved
+   * from inside the app at all and needs the same shell access that mints the
+   * bootstrap invite.
+   */
+  routes.post('/admin/people/:id/recovery', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const target = c.req.param('id')
+
+    if (target === actorUserId) {
+      throw badRequest('Add a device from your account page instead', { reason: 'self_recovery' })
+    }
+
+    try {
+      const recovery = await createRecovery({ userId: target, createdBy: actorUserId })
+
+      await recordAudit({
+        actorType: 'user',
+        actorUserId,
+        action: 'recovery.issue',
+        outcome: 'success',
+        /*
+          The subject is the person the link opens, and recording it is what
+          makes this visible *to them* rather than only to other admins.
+
+          The audit log resolves its subject through `subject_pubkey` against
+          `user_keys` — a `subjectUserId` in the detail is not indexed and
+          nothing joins on it. Omitting this wrote a record that existed, said
+          the right thing, and did not appear on the one screen it was written
+          for, which is the whole point of the ticket.
+        */
+        subjectPubkey: (await getActivePubkey(target)) ?? undefined,
+        // Never the token: the audit log is read by more admins than the link
+        // is meant for, and it authorises taking over an identity.
+        detail: { subjectUserId: target, expiresAt: recovery.expiresAt.toISOString() },
+        requestId: c.get('requestId'),
+      })
+
+      return c.json({
+        url: `${config().ISSUER_URL}/?recover=${recovery.token}`,
+        expiresAt: recovery.expiresAt.toISOString(),
+      })
+    } catch (error) {
+      if (error instanceof RecoveryRefused) {
+        if (error.reason === 'no_such_person') throw notFound('No such person')
+        // Recovering a suspended or offboarded identity would be a way back in
+        // that bypasses the decision to take access away. Reinstating somebody
+        // is a status change first, deliberately a separate act.
+        throw conflict(error.message, { reason: error.reason })
       }
       throw error
     }

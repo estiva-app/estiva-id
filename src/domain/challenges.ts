@@ -10,7 +10,16 @@ import { query, queryOne } from '../db/pool.js'
 
 const TTL_SECONDS = 300
 
-export type Ceremony = 'registration' | 'authentication'
+/**
+ * `recovery` is separate from `registration` on purpose (PEEK-67).
+ *
+ * Both end in a new credential, but only the recovery route also retires the
+ * old passkeys and burns the recovery link. Sharing a ceremony would let a
+ * recovery challenge be redeemed at `/auth/register/verify`, which does neither
+ * — leaving a live link and a lost device that still works. Separating them
+ * makes that combination unrepresentable rather than merely unlikely.
+ */
+export type Ceremony = 'registration' | 'authentication' | 'recovery'
 
 export async function storeChallenge(input: {
   challenge: string

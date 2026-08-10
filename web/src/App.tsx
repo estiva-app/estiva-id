@@ -11,6 +11,7 @@ import { AdminPeople, AdminPerson } from './AdminPeople'
 import { AuditLog } from './AuditLog'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
+import { SecurityCard } from './SecurityCard'
 import { SignIn } from './SignIn'
 import {
   ApiError,
@@ -122,8 +123,10 @@ export function App() {
       window.location.assign(next)
       return
     }
-    // Drop `?invite=…` from the address bar: it is spent, and leaving a bearer
-    // token in history and in every screenshot afterwards is careless.
+    // Drop `?invite=…` and `?recover=…` from the address bar: both are spent,
+    // and leaving a bearer token in history and in every screenshot afterwards
+    // is careless. The recovery one matters more — it opens an existing account
+    // rather than an empty new one.
     window.history.replaceState({}, '', window.location.pathname)
     await load()
   }, [load])
@@ -262,6 +265,18 @@ export function App() {
         </div>
       )}
 
+      {/*
+        The same trap for a recovery link, and worse: an invite opened by the
+        wrong person creates nothing, while a recovery link opened by the wrong
+        person would hand them somebody else's account.
+      */}
+      {new URLSearchParams(window.location.search).has('recover') && (
+        <div className="notice warn">
+          You are signed in as {me.email ?? 'this account'}, so that recovery link was not used. It
+          is meant for whoever lost their passkeys — send it to them, and do not use it yourself.
+        </div>
+      )}
+
       {me.status !== 'active' && (
         <div className="notice warn">
           This identity is {me.status}. You can still see it, but it can no longer sign or publish.
@@ -276,6 +291,13 @@ export function App() {
         credentials={credentials}
         onChange={(next) => setState({ ...state, credentials: next })}
       />
+
+      {/*
+        Below the passkeys, because it is mostly about them — and because an
+        admin-issued recovery is only distinguishable from an admin takeover if
+        the person it happened to can see it (PEEK-67).
+      */}
+      <SecurityCard />
     </div>
   )
 }

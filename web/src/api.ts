@@ -269,6 +269,70 @@ export const registerOptions = (inviteToken: string) =>
     body: JSON.stringify({ inviteToken }),
   })
 
+// --- Recovery (PEEK-67) -----------------------------------------------------
+
+export interface RecoveryPreview {
+  email: string | null
+  displayName: string | null
+  expiresAt: string
+}
+
+/**
+ * Whose account this link opens, before anybody touches an authenticator.
+ *
+ * Same unauthenticated shape as `getInvite`: the caller has no session by
+ * definition — being unable to get one is why they are here.
+ */
+export async function getRecovery(
+  token: string,
+): Promise<{ valid: true; recovery: RecoveryPreview } | { valid: false; reason: string }> {
+  const response = await fetch(`/recovery/${encodeURIComponent(token)}`, {
+    credentials: 'same-origin',
+  })
+  const body = (await response.json().catch(() => ({ ok: false, reason: 'unknown' }))) as
+    | { ok: true; recovery: RecoveryPreview }
+    | { ok: false; reason: string }
+
+  return body.ok ? { valid: true, recovery: body.recovery } : { valid: false, reason: body.reason }
+}
+
+export const recoverOptions = (recoveryToken: string) =>
+  request<PublicKeyCredentialCreationOptionsJSON>('/auth/recover/options', {
+    method: 'POST',
+    body: JSON.stringify({ recoveryToken }),
+  })
+
+/**
+ * Its own route, not `verifyCredential`.
+ *
+ * Only this one retires the passkeys that were lost and burns the link; the
+ * ordinary registration route does neither, and the server refuses a recovery
+ * challenge there for exactly that reason.
+ */
+export const recoverVerify = (attestation: unknown) =>
+  request<{ verified: boolean; pubkey: string; passkeysRetired: number }>('/auth/recover/verify', {
+    method: 'POST',
+    body: JSON.stringify(attestation),
+  })
+
+export const issueRecovery = (id: string) =>
+  request<{ url: string; expiresAt: string }>(`/admin/people/${encodeURIComponent(id)}/recovery`, {
+    method: 'POST',
+  })
+
+export interface SecurityEvent {
+  id: string
+  occurredAt: string
+  action: string
+  outcome: 'success' | 'refused' | 'error'
+  actorEmail: string | null
+  actorDisplayName: string | null
+  bySomeoneElse: boolean
+}
+
+export const listSecurityEvents = () =>
+  request<{ events: SecurityEvent[] }>('/me/security-events').then((r) => r.events)
+
 // --- Passkeys ---------------------------------------------------------------
 
 export interface Credential {
