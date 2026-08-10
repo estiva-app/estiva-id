@@ -112,6 +112,25 @@ export const listPeople = () => request<{ people: Person[] }>('/admin/people').t
 export const getPerson = (id: string) =>
   request<{ person: Person; credentials: Credential[] }>(`/admin/people/${encodeURIComponent(id)}`)
 
+export interface OffboardResult {
+  userId: string
+  pubkey: string | null
+  passkeysRevoked: number
+  sessionsRevoked: number
+  handleRevoked: string | null
+  /** False means the handle still resolves for anyone reading the old event. */
+  attestationPublished: boolean
+  publishError?: string | null
+  /**
+   * Always outstanding. Buzz owns admission and exposes no way to drive it, so
+   * this carries the command an operator still has to run.
+   */
+  relayAdmission: { revoked: false; reason: string; command: string }
+}
+
+export const offboardPerson = (id: string) =>
+  request<OffboardResult>(`/admin/people/${encodeURIComponent(id)}/offboard`, { method: 'POST' })
+
 // --- The audit trail (PEEK-69) ----------------------------------------------
 
 export interface AuditEntry {

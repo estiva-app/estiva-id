@@ -9,6 +9,7 @@ Companion documents:
 | --- | --- |
 | Understand the at-rest key format | [KEY-CUSTODY.md](KEY-CUSTODY.md) |
 | Know what was decided about domains and admission | [OPEN-SEAMS.md](OPEN-SEAMS.md) |
+| Offboard somebody | [OFFBOARDING.md](OFFBOARDING.md) |
 | Call the service | [API.md](API.md) |
 
 ---
@@ -239,9 +240,16 @@ Two entries left this list on 2026-08-07 (PEEK-31):
 build. The relay serves it per workspace, and Estiva ID stays authoritative by
 publishing the profile the handle rides in.
 
-Offboarding is partly built: `/sign` and `/token` refuse a person who is not
-`active`, and revoking a handle works by republishing a `kind:0` without it.
-The one-action admin operation (PEEK-66) is not built.
+**Offboarding is one action** (PEEK-66): revoke every passkey, disable the
+account and kill its sessions, withdraw the handle by republishing a `kind:0`
+without it. Three of the four steps — the fourth, revoking admission at the
+relay, is Buzz's, and the console shows the command rather than reporting a
+success that is not true. The runbook is [OFFBOARDING.md](OFFBOARDING.md).
+
+Worth stating plainly because it is what makes Stage 4 viable: **custody adds
+nothing to offboarding.** It works identically whether or not this service holds
+the key. The levers are the badge and the door, and neither of them is the key —
+which is why user-held keys do not cost the org its ability to remove somebody.
 
 The two design questions that were held open — the domain layout for `nip05`
 (PEEK-33) and who drives community admission (PEEK-36) — were **decided on

@@ -309,3 +309,112 @@ describe('the audit trail', () => {
     }
   })
 })
+
+/** PEEK-66: the one write on this surface. */
+describe('offboarding in one action', () => {
+  it('lets an admin offboard somebody, and reports what is still outstanding', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const leaver = await createUserWithKey({ email: 'leaver@example.test' })
+
+    const response = await app.request(`/admin/people/${leaver.id}/offboard`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as {
+      relayAdmission: { revoked: boolean; command: string }
+    }
+    // The clause the ticket is explicit about: say so rather than report success.
+    expect(body.relayAdmission.revoked).toBe(false)
+    expect(body.relayAdmission.command).toContain(leaver.pubkey)
+  })
+
+  /**
+   * There is no recovery flow (PEEK-67), so an admin removing their own last
+   * way back in is a mistake nobody undoes without shell access.
+   */
+  it('refuses to let an admin offboard themselves', async () => {
+    const { cookie, user } = await signedInAs('admin@example.test', 'admin')
+    const response = await app.request(`/admin/people/${user.id}/offboard`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'self_offboard' } },
+    })
+  })
+
+  it('refuses a member and a stranger', async () => {
+    const leaver = await createUserWithKey({ email: 'leaver@example.test' })
+    const { cookie } = await signedInAs('member@example.test', 'member')
+
+    expect(
+      (
+        await app.request(`/admin/people/${leaver.id}/offboard`, {
+          method: 'POST',
+          headers: { cookie },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (await app.request(`/admin/people/${leaver.id}/offboard`, { method: 'POST' })).status,
+    ).toBe(401)
+  })
+
+  it('answers 409 the second time', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const leaver = await createUserWithKey({ email: 'leaver@example.test' })
+    const once = () =>
+      app.request(`/admin/people/${leaver.id}/offboard`, { method: 'POST', headers: { cookie } })
+
+    expect((await once()).status).toBe(200)
+    expect((await once()).status).toBe(409)
+  })
+})
+
+/**
+ * A regression from PEEK-66 landing on PEEK-64's derivation: offboarding
+ * revokes every passkey, so deriving "enrolled" from the *live* count labelled
+ * every leaver "never signed in". False, and falsest on the screen an admin
+ * checks straight after removing somebody.
+ */
+describe('enrolment after offboarding', () => {
+  it('still says a leaver enrolled, because they did', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const invite = await createInvite({ email: 'leaver@example.test', createdBy: null })
+    const device = new SoftwareAuthenticator({
+      rpId: cfg.RP_ID,
+      origin: cfg.RP_ORIGINS[0] as string,
+    })
+    const options = (await (
+      await app.request('/auth/register/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ inviteToken: invite.token }),
+      })
+    ).json()) as { challenge: string }
+    await app.request('/auth/register/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(device.register(options.challenge)),
+    })
+
+    const before = byEmail((await people(cookie)).people, 'leaver@example.test')
+    expect(before).toMatchObject({ enrolment: 'enrolled', passkeyCount: 1 })
+
+    await app.request(`/admin/people/${before?.id}/offboard`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+
+    const after = byEmail((await people(cookie)).people, 'leaver@example.test')
+    // No live passkeys, but they are not "never signed in".
+    expect(after).toMatchObject({
+      status: 'offboarded',
+      enrolment: 'enrolled',
+      passkeyCount: 0,
+    })
+  })
+})

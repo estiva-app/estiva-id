@@ -196,6 +196,7 @@ mean shipping them before anyone had looked at what the state is.
 | `GET` | `/admin/people` | Session, **admin** | Everyone with an account, plus invites nobody has opened. |
 | `GET` | `/admin/people/:id` | Session, **admin** | One person plus their passkey summaries. `404` for an unknown id **and** for an invite id. |
 | `GET` | `/admin/audit` | Session, **admin** | The audit trail. `?person=`, `?action=`, `?before=`, `?limit=`. |
+| `POST` | `/admin/people/:id/offboard` | Session, **admin** | Offboard in one action. `409` if already offboarded; `400` on yourself. |
 
 A stranger gets `401`, not `403` — a `403` would confirm the route exists to
 somebody with no session. Status is checked before role, so an admin who has been
@@ -313,6 +314,39 @@ edit answers a different question from the one it exists to answer.
 **Retention is still unsolved.** Nothing prunes this table and nothing archives
 it, so it grows forever and a restore brings all of it back. Fine at Stage 1
 volumes; it needs a policy before it is not.
+
+### `POST /admin/people/:id/offboard`
+
+One action, because a partly-offboarded leaver is a security problem and a
+manual checklist guarantees one eventually (PEEK-66). Revokes every passkey,
+disables the account and kills its sessions, and withdraws the `nip05` handle by
+republishing a `kind:0` without it.
+
+```json
+{ "passkeysRevoked": 1, "sessionsRevoked": 2, "handleRevoked": "leaver",
+  "attestationPublished": true,
+  "relayAdmission": { "revoked": false, "reason": "buzz_owns_admission",
+                      "command": "docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey …" } }
+```
+
+**`relayAdmission.revoked` is always `false`, and that is not a bug.** Buzz owns
+community admission and exposes no way to drive it, so this does three of the
+four steps and hands back the command an operator still has to run. Reporting
+success would convert a known manual step into an unknown one.
+
+`attestationPublished: false` means the withdrawal did not reach the relay, so
+**the handle still resolves** for anyone reading the old event. The local
+revocations happen first precisely so a relay outage cannot leave a login
+working.
+
+The key is deliberately **left active** — revoking it would make everything the
+person ever signed unattributable, and `/sign` refuses on `users.status` anyway
+(PEEK-88).
+
+An admin cannot offboard themselves: there is no recovery flow (PEEK-67), so it
+is a mistake nobody undoes without shell access.
+
+Full runbook, including the relay half: [OFFBOARDING.md](OFFBOARDING.md).
 
 ## Tokens and discovery
 

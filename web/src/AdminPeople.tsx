@@ -27,9 +27,11 @@ import {
   ApiError,
   type Credential,
   type Enrolment,
+  type OffboardResult,
   type Person,
   getPerson,
   listPeople,
+  offboardPerson,
 } from './api'
 
 const formatDate = (iso: string) =>
@@ -329,6 +331,13 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         )}
       </section>
 
+      <OffboardCard
+        person={person}
+        onDone={() => {
+          void load()
+        }}
+      />
+
       {/*
         Both directions on purpose: what this person did, and what was done to
         them. "Who offboarded this account" is the question an admin opens a
@@ -342,5 +351,125 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         <AuditLog person={person.id} compact />
       </section>
     </>
+  )
+}
+
+/**
+ * Offboarding, and the step this service cannot take (PEEK-66).
+ *
+ * The button does three of the four things offboarding means: revoke every
+ * passkey, disable the account and kill its sessions, withdraw the `nip05`
+ * handle by republishing a profile without it. The fourth — revoking admission
+ * at the relay — belongs to Buzz, which exposes no way to drive it.
+ *
+ * **So this refuses to report success.** A green tick with the relay still
+ * accepting the person's events would be worse than no button, because it
+ * converts a known manual step into an unknown one. What is shown instead is
+ * the exact command, with their pubkey already in it, and it stays on the page
+ * rather than passing by as a toast — the person is still half-offboarded until
+ * somebody runs it, and the screen should keep saying so.
+ */
+function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<OffboardResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const gone = person.status === 'offboarded'
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    try {
+      setResult(await offboardPerson(person.id))
+      setConfirming(false)
+      onDone()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not offboard')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // The command outlives the request that produced it: an admin who reloads
+  // still has somebody to remove from the relay.
+  const command =
+    result?.relayAdmission.command ??
+    (gone && person.pubkey
+      ? `docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey ${person.pubkey}`
+      : null)
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Offboarding</h2>
+      </div>
+
+      {result && (
+        <div className="notice ok">
+          Revoked {result.passkeysRevoked} passkey{result.passkeysRevoked === 1 ? '' : 's'} and{' '}
+          {result.sessionsRevoked} session{result.sessionsRevoked === 1 ? '' : 's'}
+          {result.handleRevoked ? `, and withdrew ${result.handleRevoked}` : ''}. They can no longer
+          sign in, take a token, or sign anything here.
+        </div>
+      )}
+
+      {result && !result.attestationPublished && (
+        <div className="notice error">
+          The profile withdrawing their handle did not reach the relay
+          {result.publishError ? ` (${result.publishError})` : ''}, so{' '}
+          <strong>the handle still resolves</strong> for anyone reading the old event. Republish
+          once the relay is reachable.
+        </div>
+      )}
+
+      {command ? (
+        <>
+          <div className="notice warn">
+            <strong>Not finished.</strong> The relay still admits this person, and Estiva ID cannot
+            change that — Buzz owns admission and offers no API for it. Until somebody runs this,
+            they can still read and write on the relay with the key they kept.
+          </div>
+          <div className="row">
+            <code className="command">{command}</code>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(command)
+                setCopied(true)
+              }}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="card-note">
+          Revokes every passkey, disables the account and withdraws their handle — in one action,
+          because a half-finished offboarding is the dangerous kind. It does <strong>not</strong>{' '}
+          delete anything they wrote: revocation removes what they can do next, and the org keeps
+          the record.
+        </p>
+      )}
+
+      {error && <div className="notice error">{error}</div>}
+
+      {!gone &&
+        (confirming ? (
+          <div className="row">
+            <button type="button" className="danger" onClick={run} disabled={busy}>
+              {busy ? 'Offboarding…' : `Yes, offboard ${person.displayName ?? person.email}`}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="danger" onClick={() => setConfirming(true)}>
+            Offboard this person
+          </button>
+        ))}
+    </section>
   )
 }

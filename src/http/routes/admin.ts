@@ -5,16 +5,21 @@
  * the admin surface hangs off it — offboarding in one action (PEEK-66) and
  * adding a person (PEEK-65) both start from a row on this list.
  *
- * Read-only, deliberately. Every mutation an admin might want here already
- * exists as a domain function with its own ticket, and adding writes to the
- * screen that first makes the state legible would mean shipping them before
- * anybody had looked at what the state actually is.
+ * Read-first, and still nearly read-only. The list, the person and the audit
+ * trail were built before any write, so that the screen making the state legible
+ * shipped before anything that changes it.
+ *
+ * **One write now exists: offboarding** (PEEK-66). It earned the exception by
+ * being the operation a half-completed checklist makes dangerous — the case
+ * where doing it in one action is the whole point. Other mutations an admin
+ * might want still live as domain functions with their own tickets.
  */
 import { Hono } from 'hono'
 import { auditActions, effectiveLimit, listAudit } from '../../domain/audit-log.js'
 import { listCredentialSummaries } from '../../domain/credentials.js'
 import { getDirectoryEntry, listDirectory } from '../../domain/directory.js'
-import { notFound } from '../../errors.js'
+import { AlreadyOffboarded, NoSuchPerson, offboardPerson } from '../../domain/offboarding.js'
+import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { adminOnly } from '../middleware/admin.js'
 
@@ -79,6 +84,38 @@ export function adminRoutes(): Hono<AppEnv> {
       person,
       credentials: await listCredentialSummaries(person.id),
     })
+  })
+
+  /**
+   * Offboard, in one action (PEEK-66).
+   *
+   * The first write on this surface, and it stays the only one for a reason:
+   * offboarding is the operation where a half-completed checklist is a security
+   * problem, so it is exactly the one worth making atomic.
+   *
+   * **It does three of the four steps and says so.** Revoking community
+   * admission is Buzz's, and the response carries the command an operator still
+   * has to run rather than reporting a success that is not true.
+   */
+  routes.post('/admin/people/:id/offboard', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const target = c.req.param('id')
+
+    // An admin removing their own last route back in is a mistake nobody
+    // recovers from without shell access — there is no recovery flow (PEEK-67).
+    if (target === actorUserId) {
+      throw badRequest('You cannot offboard yourself', { reason: 'self_offboard' })
+    }
+
+    try {
+      return c.json(await offboardPerson(target, { actorUserId, requestId: c.get('requestId') }))
+    } catch (error) {
+      if (error instanceof NoSuchPerson) throw notFound('No such person')
+      if (error instanceof AlreadyOffboarded) {
+        throw conflict('That identity is already offboarded', { reason: 'already_offboarded' })
+      }
+      throw error
+    }
   })
 
   return routes
