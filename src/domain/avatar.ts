@@ -100,7 +100,16 @@ export async function setAvatar(
       action: 'avatar.upload',
       outcome: upload.reason === 'not_admitted' ? 'refused' : 'error',
       // Never the bytes, and never the URL of something that was not stored.
-      detail: { reason: upload.reason, httpStatus: upload.httpStatus },
+      //
+      // `message` is the media store's own words, and it is here because
+      // without it this record said `422` and nothing else — which took reading
+      // Buzz's source to interpret (PEEK-96). A status alone is not enough to
+      // diagnose a refusal from the log, which is the log's entire job.
+      detail: {
+        reason: upload.reason,
+        httpStatus: upload.httpStatus,
+        message: upload.message,
+      },
       ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
     })
     throw upload

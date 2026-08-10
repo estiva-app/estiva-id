@@ -8,6 +8,7 @@
  */
 import { type FormEvent, useRef, useState } from 'react'
 import { ApiError, type Profile, type SaveProfileResult, saveProfile, uploadAvatar } from './api'
+import { ImageUnreadable, prepareAvatar } from './image'
 
 interface Props {
   profile: Profile
@@ -181,7 +182,10 @@ function AvatarField({
     setBusy(true)
     setError(null)
     try {
-      onUploaded(await uploadAvatar(file))
+      // Metadata is stripped before the bytes leave the browser (PEEK-96). The
+      // relay refuses any image carrying EXIF, which is every photo off a phone
+      // — and uploading one would publish its GPS coordinates to a shared relay.
+      onUploaded(await uploadAvatar(await prepareAvatar(file)))
     } catch (caught) {
       // The one refusal worth naming: the person exists here but the relay has
       // never been told about them, and only an operator can fix it. "Upload
@@ -192,6 +196,17 @@ function AvatarField({
       ) {
         setError(
           'Your identity has not been admitted to the workspace relay yet, so it cannot store files. Ask an admin.',
+        )
+      } else if (caught instanceof ImageUnreadable) {
+        setError(caught.message)
+      } else if (caught instanceof ApiError) {
+        // Carry the media store's own words. Without them this said only "the
+        // media store refused that file", which is not something anybody can
+        // act on — and it was the message that made PEEK-96 take source-reading
+        // to diagnose.
+        const detail = (caught.detail as { detail?: unknown } | undefined)?.detail
+        setError(
+          typeof detail === 'string' && detail ? `${caught.message}: ${detail}` : caught.message,
         )
       } else {
         setError(caught instanceof Error ? caught.message : 'Could not upload that picture')
