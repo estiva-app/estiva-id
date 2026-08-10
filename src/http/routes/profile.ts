@@ -9,6 +9,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { config } from '../../config.js'
+import { AvatarRejected, MAX_AVATAR_BYTES, setAvatar } from '../../domain/avatar.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import {
   HandleTakenError,
@@ -19,7 +20,14 @@ import {
   saveProfile,
 } from '../../domain/profile.js'
 import { findUserById } from '../../domain/users.js'
-import { badRequest, conflict, forbidden, notFound } from '../../errors.js'
+import {
+  AppError,
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+  policyViolation,
+} from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { requireSession } from '../middleware/session.js'
 
@@ -106,5 +114,77 @@ export function profileRoutes(): Hono<AppEnv> {
     })
   })
 
+  /**
+   * Upload a profile picture (PEEK-32).
+   *
+   * Raw bytes with a `Content-Type`, not multipart. There is exactly one file
+   * and no other fields, so a multipart envelope would be parsing overhead
+   * around a body we already have — and `fetch(file)` in the browser sends this
+   * shape with no work at all.
+   *
+   * Separate from `PUT /me/profile` because it fails differently: that route
+   * cannot fail at the relay in a way that loses the edit, and this one can be
+   * refused outright by a media store that has never heard of the person.
+   */
+  routes.put('/me/avatar', requireSession, async (c) => {
+    const { userId } = c.get('session')
+
+    const user = await findUserById(userId)
+    if (!user) throw notFound('No such identity')
+    if (user.status !== 'active') throw forbidden('That identity is no longer active')
+
+    const contentType = c.req.header('content-type') ?? ''
+    const body = new Uint8Array(await c.req.arrayBuffer())
+
+    try {
+      const outcome = await setAvatar(userId, body, contentType, {
+        requestId: c.get('requestId'),
+      })
+      return c.json({
+        profile: present(await getProfile(userId), await getActivePubkey(userId)),
+        avatar: { url: outcome.url, sha256: outcome.sha256, size: outcome.size },
+        published: outcome.published,
+        eventId: outcome.eventId ?? null,
+        ...(outcome.published ? {} : { publishError: outcome.publishError ?? null }),
+      })
+    } catch (error) {
+      if (error instanceof AvatarRejected) {
+        throw badRequest(error.message, { reason: error.reason, maxBytes: MAX_AVATAR_BYTES })
+      }
+      // An upload the relay refused. `not_admitted` is called out on its own
+      // because it is the one an operator can fix in a minute, and telling
+      // somebody "upload failed" when the answer is "nobody has let you in yet"
+      // sends them looking in the wrong place — see the closed-relay note in
+      // deploy/README.md.
+      if (isUploadFailure(error)) {
+        if (error.reason === 'not_admitted') {
+          throw forbidden('This identity has not been admitted to the relay yet', {
+            reason: 'not_admitted',
+          })
+        }
+        // `rejected` is the media store declining this content — wrong type,
+        // too large, rate limited. Well-formed request, refused on policy,
+        // which is what `policy_violation` already means here. `unreachable`
+        // is ours and stays a 500.
+        if (error.reason === 'rejected') {
+          throw policyViolation('The media store refused that file', {
+            reason: error.reason,
+            detail: error.message,
+          })
+        }
+        throw new AppError('internal', 'Could not reach the media store', {
+          reason: error.reason,
+        })
+      }
+      throw error
+    }
+  })
+
   return routes
+}
+
+function isUploadFailure(
+  error: unknown,
+): error is { ok: false; reason: string; message: string; httpStatus: number } {
+  return typeof error === 'object' && error !== null && 'ok' in error && 'reason' in error
 }
