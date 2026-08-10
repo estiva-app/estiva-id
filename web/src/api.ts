@@ -212,7 +212,9 @@ export interface UploadAvatarResult extends SaveProfileResult {
  * signs the Blossom authorization with the custodied key, which is why this
  * cannot be a direct browser-to-relay upload.
  */
-export const uploadAvatar = (file: File) =>
+// A `Blob` rather than a `File`: what reaches here has been re-encoded to strip
+// metadata (PEEK-96), so it is no longer the object the person picked.
+export const uploadAvatar = (file: Blob) =>
   request<UploadAvatarResult>('/me/avatar', {
     method: 'PUT',
     // `File` is a `Blob`, so the browser sets Content-Length itself.
