@@ -48,7 +48,19 @@ export const SEED_APPS: readonly SeedApp[] = [
     clientId: 'linear-lite',
     name: 'Estiva Ship (linear-lite)',
     // PEEK-71: 30850, 30851, 1851, 9, 5, 31989 — plus 27235, as above.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 31989, 27235],
+    //
+    // 9007 is the Folder, and it was missing. Ship's own `kinds.ts` calls it
+    // "required on every object below" — it is the container each project,
+    // issue, change and message carries in its `h` tag. Without it Ship can add
+    // objects to a folder somebody else created and cannot create its first
+    // one, because `createProject` publishes the Folder before the Project.
+    // Listing the object kinds without their container is not a lower ceiling,
+    // it is a broken one.
+    //
+    // The same number is a huddle for Peek, above. That is fine: this list says
+    // what an app may sign, not what a kind means, and the two apps are
+    // separately bounded.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },
