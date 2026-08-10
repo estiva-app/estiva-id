@@ -6,8 +6,8 @@
  * private card is the thing a person most needs to understand here and the
  * least likely to guess.
  */
-import { type FormEvent, useState } from 'react'
-import { ApiError, type Profile, type SaveProfileResult, saveProfile } from './api'
+import { type FormEvent, useRef, useState } from 'react'
+import { ApiError, type Profile, type SaveProfileResult, saveProfile, uploadAvatar } from './api'
 
 interface Props {
   profile: Profile
@@ -94,15 +94,19 @@ export function ProfileCard({ profile, onSaved }: Props) {
           />
         </label>
 
-        <label>
-          <span className="label-text">Avatar URL</span>
-          <input
-            type="url"
-            value={picture}
-            onChange={(e) => setPicture(e.target.value)}
-            placeholder="https://…"
-          />
-        </label>
+        <AvatarField
+          picture={picture}
+          onUploaded={(result) => {
+            setPicture(result.profile.picture ?? '')
+            onSaved(result.profile)
+            setStatus({
+              kind: 'saved',
+              published: result.published,
+              publishError: result.publishError,
+            })
+          }}
+          onCleared={() => setPicture('')}
+        />
 
         <label>
           <span className="label-text">Handle</span>
@@ -141,6 +145,106 @@ export function ProfileCard({ profile, onSaved }: Props) {
         </div>
       </form>
     </section>
+  )
+}
+
+/**
+ * Choosing a picture (PEEK-32).
+ *
+ * A file picker rather than a URL box. The URL is not a thing a person has —
+ * it is a sha256 of the bytes, produced by the upload — so asking for one was
+ * asking them to host an image somewhere first, which is why Stage 0 ended up
+ * pointing every avatar at one app's storage.
+ *
+ * The resulting URL is still shown. It is content-addressed and lives on the
+ * workspace's own relay, and both of those are the point of the change.
+ *
+ * **Uploading publishes immediately**, unlike the text fields, which wait for
+ * Save. It has to: the bytes are already stored and `picture` has already
+ * changed, so leaving the profile unpublished would mean the relay disagreeing
+ * with this page until something else happened to save.
+ */
+function AvatarField({
+  picture,
+  onUploaded,
+  onCleared,
+}: {
+  picture: string
+  onUploaded: (result: Awaited<ReturnType<typeof uploadAvatar>>) => void
+  onCleared: () => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onPick(file: File) {
+    setBusy(true)
+    setError(null)
+    try {
+      onUploaded(await uploadAvatar(file))
+    } catch (caught) {
+      // The one refusal worth naming: the person exists here but the relay has
+      // never been told about them, and only an operator can fix it. "Upload
+      // failed" would send them looking at their file.
+      if (
+        caught instanceof ApiError &&
+        (caught.detail as { reason?: string } | undefined)?.reason === 'not_admitted'
+      ) {
+        setError(
+          'Your identity has not been admitted to the workspace relay yet, so it cannot store files. Ask an admin.',
+        )
+      } else {
+        setError(caught instanceof Error ? caught.message : 'Could not upload that picture')
+      }
+    } finally {
+      setBusy(false)
+      // Let the same file be chosen again after a failure.
+      if (input.current) input.current.value = ''
+    }
+  }
+
+  return (
+    <div className="field">
+      <span className="label-text">Picture</span>
+
+      <div className="row avatar-row">
+        {picture ? (
+          <img className="avatar-preview" src={picture} alt="" />
+        ) : (
+          <div className="avatar-preview is-empty" aria-hidden="true" />
+        )}
+
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void onPick(file)
+          }}
+        />
+        <button type="button" onClick={() => input.current?.click()} disabled={busy}>
+          {busy ? 'Uploading…' : picture ? 'Replace' : 'Choose a picture'}
+        </button>
+        {picture && (
+          <button type="button" className="link" onClick={onCleared} disabled={busy}>
+            Remove
+          </button>
+        )}
+      </div>
+
+      {error ? (
+        <p className="hint error">{error}</p>
+      ) : picture ? (
+        <p className="hint">
+          Stored on the workspace relay and addressed by its own checksum, so the link stays valid
+          for as long as the workspace does. <span className="mono">{picture}</span>
+        </p>
+      ) : (
+        <p className="hint">PNG, JPEG, WebP or GIF, up to 5 MB. Removing takes effect on save.</p>
+      )}
+    </div>
   )
 }
 

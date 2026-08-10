@@ -101,6 +101,7 @@ the key through an internal path rather than through that endpoint.
 | --- | --- | --- | --- |
 | `GET` | `/me/profile` | Session | `{ displayName, picture, handle, communityHost, nip05, pubkey }`. |
 | `PUT` | `/me/profile` | Session | Partial update, then publish. `409` if the handle is taken; `403` once the identity is not `active`. |
+| `PUT` | `/me/avatar` | Session | Raw image bytes. Uploads to the relay, stores the URL as `picture`, republishes. |
 
 ```json
 { "displayName": "Ada", "picture": "https://…/a.png", "handle": "ada" }
@@ -170,6 +171,54 @@ An unopened invite appears on the list and is deliberately **not** addressable a
 `/admin/people/:id`: there is no account to open, and everything known about it
 is already on the row. Once somebody opens their link they have a user row, and
 they stop appearing as an invite so nobody is listed twice.
+
+### `PUT /me/avatar`
+
+Raw bytes with the file's own `Content-Type` — not multipart. There is one file
+and no other fields, so `body: file` in the browser is the whole request.
+
+PNG, JPEG, WebP or GIF, up to 5 MB. **SVG is refused**: it is a document that can
+carry script, and an avatar renders in every app in the suite.
+
+```json
+{ "profile": { … }, "avatar": { "url": "…", "sha256": "…", "size": 8134 },
+  "published": true, "eventId": "…" }
+```
+
+The URL is content-addressed and served by the workspace's own relay, which is
+the point — Stage 0 published a Convex storage URL, tying an ecosystem-wide
+avatar to one deployment's lifetime.
+
+**The upload must succeed before anything is written.** A `picture` pointing at
+a blob that was never stored is a broken avatar in every app at once. After that
+the usual split applies: the save is committed and `published` reports
+separately, so a relay that takes the blob and refuses the event leaves the
+avatar set rather than rolling it back.
+
+Refusals worth distinguishing:
+
+| Condition | Code | HTTP |
+| --- | --- | --- |
+| Not an allowed type, empty, or over 5 MB | `bad_request` | 400 |
+| Identity not admitted to the relay | `forbidden`, `detail.reason = not_admitted` | 403 |
+| Media store declined the file | `policy_violation` | 422 |
+| Media store unreachable | `internal` | 500 |
+
+`not_admitted` is called out on its own because it is the one an operator can fix
+in a minute — the relay runs closed, and telling somebody "upload failed" when
+the answer is "nobody has let you in yet" sends them to look at their file.
+
+**This is Blossom BUD-11, not NIP-98.** The media store authenticates with a
+signed `kind:24242` event: `t=upload`, an `x` tag matching the body's sha256, a
+*required* `expiration` in the future, **non-empty `content`**, and a mandatory
+`X-SHA-256` request header agreeing with the `x` tag. Buzz answers `401` for
+anything wrong with that event and `403` only for membership, which is what lets
+`scripts/probe-blossom.ts` verify the client against the live relay without
+being admitted to it and without storing anything.
+
+The upload is signed **here**, not in the browser: the key is custodied, and
+minting a Blossom token through `/sign` is exactly the rubber stamp `/sign` was
+constrained to refuse.
 
 ## Tokens and discovery
 

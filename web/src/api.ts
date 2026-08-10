@@ -145,6 +145,26 @@ export const saveProfile = (update: {
   handle?: string | null
 }) => request<SaveProfileResult>('/me/profile', { method: 'PUT', body: JSON.stringify(update) })
 
+export interface UploadAvatarResult extends SaveProfileResult {
+  avatar: { url: string; sha256: string; size: number }
+}
+
+/**
+ * Upload an avatar to the workspace's media store (PEEK-32).
+ *
+ * Raw bytes with the file's own `Content-Type`, not multipart — there is one
+ * file and no other fields, so `body: file` is the whole request. The service
+ * signs the Blossom authorization with the custodied key, which is why this
+ * cannot be a direct browser-to-relay upload.
+ */
+export const uploadAvatar = (file: File) =>
+  request<UploadAvatarResult>('/me/avatar', {
+    method: 'PUT',
+    // `File` is a `Blob`, so the browser sets Content-Length itself.
+    body: file,
+    headers: { 'content-type': file.type },
+  })
+
 // --- Getting in ---------------------------------------------------------------
 
 export const loginOptions = () =>

@@ -367,6 +367,31 @@ ul.people li:first-child {
   color: var(--accent);
 }
 
+/* The avatar picker (PEEK-32). */
+.field {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.avatar-row {
+  margin-top: 0.3rem;
+}
+
+.avatar-preview {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  flex: none;
+}
+
+/* A dashed ring, so "nothing here yet" does not read as a broken image. */
+.avatar-preview.is-empty {
+  border-style: dashed;
+}
+
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;

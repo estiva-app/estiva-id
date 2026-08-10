@@ -186,10 +186,21 @@ Stage 4. Conflating the two would force client-side signing now.
 
 ## 8. Deliberately not built yet
 
-The private directory API, Blossom avatars, role and service identities, any
-*write* to Buzz's admission API, and recovery flows.
+The private directory API, role and service identities, any *write* to Buzz's
+admission API, and recovery flows.
 
-Four entries left this list on 2026-08-10. **A user interface exists** — the
+**Avatars moved to the relay's Blossom store on 2026-08-10** (PEEK-32).
+`PUT /me/avatar` uploads with the custodied key and publishes a
+content-addressed URL as `picture`, retiring the Convex storage URL Stage 0
+shipped — which tied an ecosystem-wide avatar to one deployment's lifetime.
+
+The signing happens here rather than in the browser, and that is the same
+argument as `/sign`: the media store wants a signed `kind:24242` event, and the
+two ways to produce one client-side are handing the browser a secret key or
+letting `/sign` mint arbitrary Blossom tokens. Both undo something this service
+exists to hold.
+
+Five entries left this list on 2026-08-10. **A user interface exists** — the
 account page (PEEK-68) and the enrolment screen it ships with — **invites** are
 built and are now the only way in (PEEK-65), and the **admin console has its
 first screen**: the people list (PEEK-64).
