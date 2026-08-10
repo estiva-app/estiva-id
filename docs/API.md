@@ -195,6 +195,7 @@ mean shipping them before anyone had looked at what the state is.
 | --- | --- | --- | --- |
 | `GET` | `/admin/people` | Session, **admin** | Everyone with an account, plus invites nobody has opened. |
 | `GET` | `/admin/people/:id` | Session, **admin** | One person plus their passkey summaries. `404` for an unknown id **and** for an invite id. |
+| `GET` | `/admin/audit` | Session, **admin** | The audit trail. `?person=`, `?action=`, `?before=`, `?limit=`. |
 
 A stranger gets `401`, not `403` — a `403` would confirm the route exists to
 somebody with no session. Status is checked before role, so an admin who has been
@@ -277,6 +278,41 @@ being admitted to it and without storing anything.
 The upload is signed **here**, not in the browser: the key is custodied, and
 minting a Blossom token through `/sign` is exactly the rubber stamp `/sign` was
 constrained to refuse.
+
+### `GET /admin/audit`
+
+Written since the service was built, read by nobody until PEEK-69 — which left
+"custody is acceptable because misuse cannot happen unseen" resting on a table
+with no viewer.
+
+```json
+{ "entries": [ { "id": "42", "occurredAt": "…", "action": "user.status_change",
+                 "outcome": "success",
+                 "actorUserId": "…", "actorEmail": "admin@…", "actorClientId": null,
+                 "subjectUserId": "…", "subjectEmail": "leaver@…",
+                 "detail": { "from": "active", "to": "offboarded" } } ],
+  "nextBefore": "37", "actions": ["invite.create", "…"] }
+```
+
+`?person=<user id>` returns **what that person did and what was done to them**.
+Both directions, because "who offboarded this account" is the question a history
+is opened to answer, and it is not something the account itself did.
+
+The subject is resolved from `subject_pubkey` through `user_keys` — including
+rotated keys, so a record written before a rotation still names the right
+person.
+
+**Paged by `id`, not by time.** A request writes several rows in the same
+millisecond, so a timestamp cursor drops or repeats rows at a page boundary.
+`nextBefore` is returned **only when the page came back full**; a short page is
+the end.
+
+Read-only, and there is no write surface at all — an audit log an admin can
+edit answers a different question from the one it exists to answer.
+
+**Retention is still unsolved.** Nothing prunes this table and nothing archives
+it, so it grows forever and a restore brings all of it back. Fine at Stage 1
+volumes; it needs a policy before it is not.
 
 ## Tokens and discovery
 

@@ -248,3 +248,64 @@ describe('what the list reports about a workspace', () => {
     expect(byEmail((await people(cookie)).people, 'nohandle@example.test')?.nip05).toBeNull()
   })
 })
+
+/**
+ * PEEK-69: the log gets a reader.
+ *
+ * Written since the service was built, read by nobody — which left "custody is
+ * acceptable because misuse cannot happen unseen" resting on a table with no
+ * viewer.
+ */
+describe('the audit trail', () => {
+  it('lets an admin read it, newest first', async () => {
+    const { cookie, user } = await signedInAs('admin@example.test', 'admin')
+    const leaver = await createUserWithKey({ email: 'leaver@example.test' })
+    await setUserStatus(leaver.id, 'offboarded', { actorUserId: user.id })
+
+    const response = await app.request('/admin/audit', { headers: { cookie } })
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as {
+      entries: { action: string; actorEmail: string | null; subjectEmail: string | null }[]
+      nextBefore: string | null
+      actions: string[]
+    }
+    const change = body.entries.find((e) => e.action === 'user.status_change')
+    expect(change).toMatchObject({
+      actorEmail: 'admin@example.test',
+      subjectEmail: 'leaver@example.test',
+    })
+    expect(body.actions).toContain('user.status_change')
+  })
+
+  it('scopes to one person when asked', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const one = await createUserWithKey({ email: 'one@example.test' })
+    const two = await createUserWithKey({ email: 'two@example.test' })
+    await setUserStatus(one.id, 'suspended')
+    await setUserStatus(two.id, 'suspended')
+
+    const response = await app.request(`/admin/audit?person=${one.id}`, { headers: { cookie } })
+    const { entries } = (await response.json()) as { entries: { subjectEmail: string | null }[] }
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.subjectEmail).toBe('one@example.test')
+  })
+
+  it('refuses a member and a stranger', async () => {
+    const { cookie } = await signedInAs('member@example.test', 'member')
+    expect((await app.request('/admin/audit', { headers: { cookie } })).status).toBe(403)
+    expect((await app.request('/admin/audit')).status).toBe(401)
+  })
+
+  /**
+   * An audit log an admin can edit answers a different question from the one it
+   * exists to answer, so there is no write surface at all.
+   */
+  it('offers no way to change or delete a record', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const response = await app.request('/admin/audit', { method, headers: { cookie } })
+      expect(response.status).toBe(404)
+    }
+  })
+})

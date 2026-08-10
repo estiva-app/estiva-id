@@ -257,6 +257,23 @@ export function authRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
+    /*
+      This path signs the person in as well, and until PEEK-69 it recorded only
+      the passkey — leaving the *first* session a person ever holds as the one
+      session with no record. That is the worst hole to have: it is the session
+      that establishes access, and "when did this account first get in" is the
+      first question anybody asks of a log.
+    */
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: claimed.userId,
+      action: 'session.create',
+      outcome: 'success',
+      subjectPubkey: pubkey,
+      detail: { credentialRowId, viaEnrolment: true },
+      requestId: c.get('requestId'),
+    })
+
     setSessionCookie(c, token)
     return c.json({ verified: true, pubkey })
   })

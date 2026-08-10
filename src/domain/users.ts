@@ -6,6 +6,7 @@
  * the point of having a private directory alongside the public profile.
  */
 import { queryOne, withTransaction } from '../db/pool.js'
+import { recordAudit } from './audit.js'
 import { mintKeyForUser } from './keys.js'
 
 export interface User {
@@ -56,12 +57,28 @@ export async function findUserById(id: string): Promise<User | undefined> {
  * Not exposed over HTTP yet — the admin surface is PEEK-66. This is the
  * behaviour that surface will call, defined and tested up front so it cannot be
  * half-implemented there.
+ *
+ * **Audited (PEEK-69), and this was the gap that mattered.** Every other
+ * privileged path in the service wrote a record and this one did not — which
+ * meant the single action the custody argument most depends on being visible
+ * was the one action nobody could see afterwards. An admin restoring somebody's
+ * access and an admin seizing their account are the same call with a different
+ * `status`; only this row tells them apart.
  */
 export async function setUserStatus(
   userId: string,
   status: User['status'],
+  by: {
+    /** Who did it. Absent for a script or a migration, recorded as `system`. */
+    actorUserId?: string | undefined
+    requestId?: string | undefined
+  } = {},
 ): Promise<{ sessionsRevoked: number }> {
-  return withTransaction(async (client) => {
+  // Read first: "what it changed from" is the half that makes the record
+  // meaningful, and after the update it is gone.
+  const before = await findUserById(userId)
+
+  const result = await withTransaction(async (client) => {
     await client.query('update users set status = $2, updated_at = now() where id = $1', [
       userId,
       status,
@@ -75,11 +92,49 @@ export async function setUserStatus(
     )
     return { sessionsRevoked: revoked.rowCount ?? 0 }
   })
+
+  await recordAudit({
+    // `system` when nothing named an actor, rather than attributing an
+    // unattended script to whoever happens to be passed in next.
+    actorType: by.actorUserId ? 'user' : 'system',
+    actorUserId: by.actorUserId,
+    action: 'user.status_change',
+    outcome: 'success',
+    // Who it was done *to*. The actor is the admin; this is the subject.
+    subjectPubkey: await activePubkeyFor(userId),
+    detail: {
+      subjectUserId: userId,
+      from: before?.status ?? null,
+      to: status,
+      sessionsRevoked: result.sessionsRevoked,
+    },
+    requestId: by.requestId,
+  })
+
+  return result
 }
 
 /** Offboard a person: they stop being able to act, but keep their history. */
-export async function offboardUser(userId: string): Promise<{ sessionsRevoked: number }> {
-  return setUserStatus(userId, 'offboarded')
+export async function offboardUser(
+  userId: string,
+  by: { actorUserId?: string | undefined; requestId?: string | undefined } = {},
+): Promise<{ sessionsRevoked: number }> {
+  return setUserStatus(userId, 'offboarded', by)
+}
+
+/**
+ * The pubkey to file a record against.
+ *
+ * Local rather than imported from `keys.ts`, which imports this module — and a
+ * cycle between "who someone is" and "what they can sign with" is not worth
+ * introducing for one column.
+ */
+async function activePubkeyFor(userId: string): Promise<string | undefined> {
+  const row = await queryOne<{ pubkey: string }>(
+    "select pubkey from user_keys where user_id = $1 and status = 'active'",
+    [userId],
+  )
+  return row?.pubkey
 }
 
 /**
