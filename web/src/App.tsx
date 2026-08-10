@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { AdminPeople, AdminPerson } from './AdminPeople'
+import { AuditLog } from './AuditLog'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
 import { SignIn } from './SignIn'
@@ -180,13 +181,34 @@ export function App() {
       )
     }
 
-    const personId = path.slice('/admin/'.length)
+    /*
+      **A client route must not collide with an API path.** The API routes are
+      mounted before the UI catch-all, deliberately, so that a mistyped API path
+      answers a JSON 404 rather than the app shell (see `http/ui.ts`). The cost
+      is that any client route sharing a string with a real endpoint is
+      swallowed by it — `/admin/audit` returned the audit *JSON* to a browser
+      navigating there, which is why this view lives at `/admin/history` while
+      its endpoint stays `/admin/audit`.
+
+      Person ids are UUIDs and cannot collide. New literal segments here can, so
+      check the route table before adding one; `ui.test.ts` pins these.
+    */
+    const rest = path.slice('/admin/'.length)
+    const onAudit = rest === 'history'
+    const personId = onAudit ? '' : rest
 
     return (
       <div className="page">
         <header className="page-head">
-          <h1>Everyone in this workspace</h1>
+          <h1>{onAudit ? 'What happened' : 'Everyone in this workspace'}</h1>
           <div className="row">
+            <button
+              type="button"
+              className="link"
+              onClick={() => navigate(onAudit ? '/admin' : '/admin/history')}
+            >
+              {onAudit ? 'Everyone' : 'History'}
+            </button>
             <button type="button" className="link" onClick={() => navigate('/')}>
               Your account
             </button>
@@ -194,7 +216,16 @@ export function App() {
           </div>
         </header>
 
-        {personId ? (
+        {onAudit ? (
+          <>
+            <p className="card-note">
+              Every privileged action this service takes or refuses. Through Stage 1 Estiva ID holds
+              every private key and can sign as anyone — this is what makes that accountable rather
+              than merely accepted.
+            </p>
+            <AuditLog />
+          </>
+        ) : personId ? (
           <AdminPerson id={personId} onBack={() => navigate('/admin')} />
         ) : (
           <AdminPeople onOpen={(id) => navigate(`/admin/${id}`)} />

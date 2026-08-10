@@ -112,6 +112,42 @@ export const listPeople = () => request<{ people: Person[] }>('/admin/people').t
 export const getPerson = (id: string) =>
   request<{ person: Person; credentials: Credential[] }>(`/admin/people/${encodeURIComponent(id)}`)
 
+// --- The audit trail (PEEK-69) ----------------------------------------------
+
+export interface AuditEntry {
+  id: string
+  occurredAt: string
+  actorType: 'user' | 'app' | 'system'
+  actorUserId: string | null
+  actorEmail: string | null
+  actorDisplayName: string | null
+  actorClientId: string | null
+  action: string
+  outcome: 'success' | 'refused' | 'error'
+  subjectPubkey: string | null
+  subjectUserId: string | null
+  subjectEmail: string | null
+  subjectDisplayName: string | null
+  detail: Record<string, unknown>
+}
+
+export interface AuditPage {
+  entries: AuditEntry[]
+  /** Pass as `before` for the next page; null at the end. */
+  nextBefore: string | null
+  /** Distinct actions present, so the filter offers real values. */
+  actions: string[]
+}
+
+export const listAudit = (filter: { person?: string; action?: string; before?: string } = {}) => {
+  const params = new URLSearchParams()
+  if (filter.person) params.set('person', filter.person)
+  if (filter.action) params.set('action', filter.action)
+  if (filter.before) params.set('before', filter.before)
+  const query = params.toString()
+  return request<AuditPage>(`/admin/audit${query ? `?${query}` : ''}`)
+}
+
 // --- Profile ----------------------------------------------------------------
 
 export interface Profile {

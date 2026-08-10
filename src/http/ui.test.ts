@@ -55,6 +55,36 @@ describe.runIf(uiIsBuilt())('the account UI', () => {
     expect(response.status).toBe(200)
   })
 
+  /**
+   * Every client-side route must reach the app, not an API handler (PEEK-69).
+   *
+   * The API is mounted *before* the catch-all so a mistyped API path answers a
+   * JSON 404 rather than the shell. The cost is that a client route sharing a
+   * string with a real endpoint is swallowed by it — `/admin/audit` served the
+   * audit JSON to a browser navigating there, which looked like a blank screen
+   * and is not something any other test would have noticed. This is the guard.
+   */
+  it.each(['/admin', '/admin/history', '/admin/0e5b6e8c-1c3f-4c2a-9a7e-2b6a1f0d4c11'])(
+    'serves the app shell for the client route %s',
+    async (route) => {
+      const response = await app.request(route, { headers: { accept: 'text/html' } })
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(await response.text()).toContain('<div id="root">')
+    },
+  )
+
+  /**
+   * And the other direction: the endpoints behind those screens must keep
+   * answering JSON to a `fetch`, which sends no `text/html`.
+   */
+  it.each(['/admin/people', '/admin/audit'])('keeps %s an API path', async (route) => {
+    const response = await app.request(route)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    // Unauthenticated, so a refusal envelope — the point is that it is JSON.
+    expect(response.status).toBe(401)
+  })
+
   it('does not let a stale shell be cached for the next person', async () => {
     const response = await app.request('/', { headers: { accept: 'text/html' } })
     expect(response.headers.get('cache-control')).toBe('no-store')

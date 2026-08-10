@@ -283,7 +283,17 @@ value, not a rewrite. Recorded so it is a decision rather than a surprise.
   account. Invite-gated enrolment is PEEK-65.
 * **KEK rotation** is expressible in the envelope format but has no procedure —
   see [KEY-CUSTODY.md](KEY-CUSTODY.md).
-* **The audit log is written but never read.** No query surface, no retention
-  policy.
+* **Audit retention.** The log is read now — `GET /admin/audit` and the History
+  screens (PEEK-69) — but nothing prunes or archives it. It grows forever, and a
+  restore brings all of it back. Fine at Stage 1 volumes; it needs a policy
+  before it is not, and that policy is a *decision* (how long must an
+  offboarding stay visible?) rather than a cron job.
+
+  Building the reader also turned up the gap that mattered more than the
+  reader: **`setUserStatus` wrote no record at all.** Offboarding — the one
+  action the custody argument most depends on being visible — was the one
+  action that left no trace. It records now, naming the actor, the subject, and
+  what the status changed *from*, which is what separates an admin restoring
+  access from an admin seizing an account.
 * **Multi-community.** One workspace is assumed throughout; see
   [ARCHITECTURE.md](ARCHITECTURE.md) §8.

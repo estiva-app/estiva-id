@@ -399,3 +399,47 @@ code {
   padding: 0.05rem 0.3rem;
   border-radius: 4px;
 }
+
+/*
+ * The audit trail (PEEK-69).
+ *
+ * Denser than the people list, because a log is read by scanning rather than by
+ * comparing — and because the useful state is "twenty lines at once", not
+ * "one line, beautifully".
+ */
+ul.audit {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.audit li {
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--border);
+}
+
+ul.audit li:first-child {
+  border-top: none;
+}
+
+.audit-line {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+/* The two names in the sentence, so a scan lands on people rather than verbs. */
+.audit-actor,
+.audit-subject {
+  font-weight: 600;
+}
+
+select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}

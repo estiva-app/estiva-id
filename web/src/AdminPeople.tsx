@@ -21,6 +21,7 @@
  * three agree, and this screen refuses to imply that when they do not.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AuditLog } from './AuditLog'
 import {
   type AdmissionStatus,
   ApiError,
@@ -307,7 +308,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
             None. This person cannot sign in, and will need a fresh invite — there is no
             admin-assisted recovery yet.
           </p>
-        ) : (
+        ) : null}
+        {credentials.length > 0 && (
           <ul className="credentials">
             {credentials.map((credential) => (
               <li key={credential.id}>
@@ -325,6 +327,19 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
             ))}
           </ul>
         )}
+      </section>
+
+      {/*
+        Both directions on purpose: what this person did, and what was done to
+        them. "Who offboarded this account" is the question an admin opens a
+        history for, and it is not an action the account itself took.
+      */}
+      <section className="card">
+        <div className="card-head">
+          <h2>History</h2>
+        </div>
+        <p className="card-note">What this person did, and what was done to them.</p>
+        <AuditLog person={person.id} compact />
       </section>
     </>
   )
