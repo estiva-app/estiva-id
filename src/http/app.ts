@@ -12,6 +12,7 @@ import { type Logger, logger } from '../logger.js'
 import { adminRoutes } from './routes/admin.js'
 import { authRoutes } from './routes/auth.js'
 import { authorizeRoutes } from './routes/authorize.js'
+import { directoryRoutes } from './routes/directory.js'
 import { inviteRoutes } from './routes/invites.js'
 import { profileRoutes } from './routes/profile.js'
 import { signRoutes } from './routes/sign.js'
@@ -73,6 +74,7 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', signRoutes())
   app.route('/', profileRoutes())
   app.route('/', adminRoutes())
+  app.route('/', directoryRoutes())
 
   // After the API routes, so the UI's catch-all can never shadow one, and only
   // when a build is present — see ui.ts.
