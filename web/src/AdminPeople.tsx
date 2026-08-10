@@ -30,6 +30,7 @@ import {
   type OffboardResult,
   type Person,
   getPerson,
+  issueRecovery,
   listPeople,
   offboardPerson,
 } from './api'
@@ -331,6 +332,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         )}
       </section>
 
+      <RecoveryCard person={person} />
+
       <OffboardCard
         person={person}
         onDone={() => {
@@ -351,6 +354,86 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         <AuditLog person={person.id} compact />
       </section>
     </>
+  )
+}
+
+/**
+ * Issuing a recovery link (PEEK-67).
+ *
+ * The one place custody pays for itself: the person's key is unchanged, so a
+ * lost laptop costs them a device rather than their history. In consumer Nostr
+ * this is simply not recoverable.
+ *
+ * **The link is shown once and never stored**, so losing it means issuing
+ * another — which supersedes the first rather than leaving two live. There is
+ * no mailer in Stage 1, so an admin copies it into a DM, exactly as with an
+ * invite.
+ */
+function RecoveryCard({ person }: { person: Person }) {
+  const [issued, setIssued] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  // Offboarding revokes every passkey, so "restore their passkey" is exactly
+  // the mistake a recovery link would be. Reinstating is a status change first.
+  if (person.status && person.status !== 'active') return null
+
+  async function issue() {
+    setBusy(true)
+    setError(null)
+    try {
+      setIssued(await issueRecovery(person.id))
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not issue a recovery link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Recovery</h2>
+      </div>
+      <p className="card-note">
+        For somebody who has lost every device holding a passkey. They enrol a new one and{' '}
+        <strong>keep the same key</strong>, so nothing they have signed detaches from them.
+      </p>
+
+      {issued ? (
+        <>
+          <div className="notice">
+            Send this to them directly. It works once, and every passkey they had before stops
+            working when they use it.
+          </div>
+          <p className="mono">{issued.url}</p>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(issued.url).then(() => setCopied(true))
+              }}
+            >
+              {copied ? 'Copied' : 'Copy link'}
+            </button>
+            <span className="cred-meta">Expires {formatDate(issued.expiresAt)}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          {error && <div className="notice error">{error}</div>}
+          <div className="row">
+            <button type="button" onClick={() => void issue()} disabled={busy}>
+              {busy ? 'Issuing…' : 'Issue a recovery link'}
+            </button>
+          </div>
+          <p className="hint">
+            Check who you are talking to first. This link hands whoever opens it this account.
+          </p>
+        </>
+      )}
+    </section>
   )
 }
 

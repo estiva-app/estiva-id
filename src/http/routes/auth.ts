@@ -28,6 +28,7 @@ import { Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { config } from '../../config.js'
+import { listAudit } from '../../domain/audit-log.js'
 import { recordAudit } from '../../domain/audit.js'
 import { consumeChallenge, storeChallenge } from '../../domain/challenges.js'
 import {
@@ -38,6 +39,7 @@ import {
   listCredentialSummaries,
   ownsActiveCredential,
   recordCredentialUse,
+  revokeAllCredentialsExcept,
   revokeCredential,
 } from '../../domain/credentials.js'
 import {
@@ -48,6 +50,11 @@ import {
 } from '../../domain/invites.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { saveProfile } from '../../domain/profile.js'
+import {
+  type RecoveryRejection,
+  consumeRecoveryForUser,
+  findRecovery,
+} from '../../domain/recovery.js'
 import {
   SESSION_COOKIE,
   createSession,
@@ -71,6 +78,39 @@ function inviteRefusal(reason: InviteRejection): string {
   if (reason === 'consumed') return 'That invite has already been used. Sign in instead.'
   return 'That invite link is not valid.'
 }
+
+/**
+ * The same courtesy for a recovery link (PEEK-67).
+ *
+ * `not_active` says the identity is no longer active rather than that the link
+ * is broken, because those have opposite fixes: one is "ask for another link",
+ * the other is "you were offboarded, and no link will help".
+ */
+function recoveryRefusal(reason: RecoveryRejection): string {
+  if (reason === 'expired') return 'That recovery link has expired. Ask an admin for a new one.'
+  if (reason === 'consumed') return 'That recovery link has already been used. Sign in instead.'
+  if (reason === 'not_active') return 'That identity is no longer active.'
+  return 'That recovery link is not valid.'
+}
+
+const recoverSchema = z.object({ recoveryToken: z.string().min(1) })
+
+/**
+ * What a person may see about their own account.
+ *
+ * An allowlist rather than a denylist, so a new audit action is invisible here
+ * until somebody decides it should be shown. The opposite default leaks the
+ * next action added by whoever was not thinking about this screen.
+ */
+const SELF_VISIBLE_ACTIONS = new Set([
+  'recovery.issue',
+  'recovery.complete',
+  'passkey.register',
+  'passkey.revoke',
+  'session.create',
+  'session.revoke',
+  'user.offboard',
+])
 
 /**
  * Enrolment takes an invite, not an email (PEEK-65).
@@ -276,6 +316,201 @@ export function authRoutes(): Hono<AppEnv> {
 
     setSessionCookie(c, token)
     return c.json({ verified: true, pubkey })
+  })
+
+  // --- Recovery (PEEK-67) -------------------------------------------------
+
+  /**
+   * What the link is for, before anybody touches an authenticator.
+   *
+   * Returns the email so the person can see whose account they are about to
+   * take a passkey on — a link forwarded to the wrong colleague should be
+   * obvious to them, not only to whoever issued it.
+   */
+  routes.get('/recovery/:token', async (c) => {
+    const lookup = await findRecovery(c.req.param('token'))
+    if (!lookup.ok) return c.json({ ok: false, reason: lookup.reason }, 404)
+
+    const user = await findUserById(lookup.recovery.userId)
+    if (!user) return c.json({ ok: false, reason: 'unknown' }, 404)
+
+    return c.json({
+      ok: true,
+      recovery: {
+        email: user.email,
+        displayName: user.display_name,
+        expiresAt: lookup.recovery.expiresAt.toISOString(),
+      },
+    })
+  })
+
+  routes.post('/auth/recover/options', async (c) => {
+    const body = recoverSchema.safeParse(await c.req.json().catch(() => ({})))
+    if (!body.success) throw badRequest('A recovery link is required')
+
+    const lookup = await findRecovery(body.data.recoveryToken)
+    if (!lookup.ok) throw forbidden(recoveryRefusal(lookup.reason))
+
+    const user = await findUserById(lookup.recovery.userId)
+    if (!user) throw notFound('No such identity')
+
+    const options = await generateRegistrationOptions({
+      rpName: cfg.RP_NAME,
+      rpID: cfg.RP_ID,
+      userID: new TextEncoder().encode(user.id),
+      userName: user.email ?? user.id,
+      userDisplayName: user.display_name ?? user.email ?? user.id,
+      attestationType: 'none',
+      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      // Deliberately not excluding the existing credentials. They are the ones
+      // that were lost, and an authenticator that still holds one would refuse
+      // the ceremony rather than replace it.
+    })
+
+    // `recovery`, not `registration`: only the route below retires the old
+    // passkeys and burns the link, so this challenge must not be redeemable at
+    // `/auth/register/verify`.
+    await storeChallenge({ challenge: options.challenge, ceremony: 'recovery', userId: user.id })
+    return c.json(options)
+  })
+
+  routes.post('/auth/recover/verify', async (c) => {
+    const response = (await c.req.json().catch(() => null)) as RegistrationResponseJSON | null
+    if (!response?.response?.clientDataJSON) throw badRequest('Missing registration response')
+
+    const challenge = challengeFromClientData(response.response.clientDataJSON)
+    const claimed = await consumeChallenge(challenge, 'recovery')
+    if (!claimed?.userId) throw badRequest('Unknown, expired or already-used challenge')
+
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge: challenge,
+      expectedOrigin: cfg.RP_ORIGINS,
+      expectedRPID: cfg.RP_ID,
+    })
+    if (!verification.verified) {
+      await recordAudit({
+        actorType: 'user',
+        actorUserId: claimed.userId,
+        action: 'recovery.complete',
+        outcome: 'refused',
+        detail: { reason: 'verification_failed' },
+        requestId: c.get('requestId'),
+      })
+      throw forbidden('Registration could not be verified')
+    }
+
+    // Re-checked after the ceremony, because it is slow enough for an admin to
+    // have offboarded somebody in the middle of it, and the later decision wins.
+    const stillRecoverable = await findUserById(claimed.userId)
+    if (!stillRecoverable || stillRecoverable.status !== 'active') {
+      await recordAudit({
+        actorType: 'user',
+        actorUserId: claimed.userId,
+        action: 'recovery.complete',
+        outcome: 'refused',
+        detail: { reason: 'not_active' },
+        requestId: c.get('requestId'),
+      })
+      throw forbidden('That identity is no longer active')
+    }
+
+    const info = verification.registrationInfo
+    const credentialRowId = await insertCredential({
+      userId: claimed.userId,
+      credentialId: info.credential.id,
+      publicKey: info.credential.publicKey,
+      signCount: info.credential.counter,
+      transports: info.credential.transports ?? [],
+      aaguid: info.aaguid,
+      backedUp: info.credentialBackedUp,
+      deviceType: info.credentialDeviceType,
+    })
+
+    /*
+      Every earlier passkey is retired, and this is the point of doing it here
+      rather than at issuance.
+
+      The premise is that the devices are gone — but "gone" usually means in
+      somebody else's hands, and a found laptop whose passkey still works is the
+      whole risk. Retiring at issuance would instead cut off a person who turns
+      out to still have a working device and never redeems the link, which
+      converts a support request into a lockout. Doing it the moment a
+      replacement exists leaves no window in either direction.
+
+      Ordered after the insert so a failure cannot leave nothing enrolled.
+    */
+    const passkeysRetired = await revokeAllCredentialsExcept(claimed.userId, credentialRowId)
+    const consumed = await consumeRecoveryForUser(claimed.userId)
+
+    const [pubkey, { token }] = await Promise.all([
+      getActivePubkey(claimed.userId),
+      createSession({
+        userId: claimed.userId,
+        credentialId: credentialRowId,
+        userAgent: c.req.header('user-agent'),
+      }),
+    ])
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: claimed.userId,
+      action: 'recovery.complete',
+      outcome: 'success',
+      subjectPubkey: pubkey,
+      // `pubkeyUnchanged` is recorded because it is the claim the whole feature
+      // rests on, and a log that does not say it cannot later be used to show it.
+      detail: { credentialRowId, passkeysRetired, consumed, pubkeyUnchanged: true },
+      requestId: c.get('requestId'),
+    })
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: claimed.userId,
+      action: 'session.create',
+      outcome: 'success',
+      subjectPubkey: pubkey,
+      detail: { credentialRowId, viaRecovery: true },
+      requestId: c.get('requestId'),
+    })
+
+    setSessionCookie(c, token)
+    return c.json({ verified: true, pubkey, passkeysRetired })
+  })
+
+  /**
+   * Your own access history (PEEK-67).
+   *
+   * Recovery is mechanically identical to an admin taking somebody's account:
+   * a new credential appears on an identity at an admin's instruction. Only the
+   * trail distinguishes them, and a trail that only other admins can read does
+   * not distinguish them *to the person it happened to* — who is the one with
+   * the motive to notice.
+   *
+   * Narrowed to the actions that concern their access. This is not the admin
+   * audit view with a filter: `/admin/audit` answers "what has happened here",
+   * and this answers "what has happened to me", which is a smaller question
+   * with a much larger audience.
+   */
+  routes.get('/me/security-events', requireSession, async (c) => {
+    const { userId } = c.get('session')
+    const entries = await listAudit({ userId, limit: 50 })
+
+    return c.json({
+      events: entries
+        .filter((entry) => SELF_VISIBLE_ACTIONS.has(entry.action))
+        .map((entry) => ({
+          id: entry.id,
+          occurredAt: entry.occurredAt,
+          action: entry.action,
+          outcome: entry.outcome,
+          // Who did it, when that was somebody else. Naming the admin is the
+          // point — "an admin" is not something a person can follow up on.
+          actorEmail: entry.actorUserId === userId ? null : entry.actorEmail,
+          actorDisplayName: entry.actorUserId === userId ? null : entry.actorDisplayName,
+          bySomeoneElse: entry.actorUserId !== null && entry.actorUserId !== userId,
+        })),
+    })
   })
 
   // --- Login --------------------------------------------------------------

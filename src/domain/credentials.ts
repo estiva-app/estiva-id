@@ -202,6 +202,30 @@ export async function revokeAllCredentials(userId: string): Promise<number> {
 }
 
 /**
+ * Retire every passkey but the one just enrolled (PEEK-67).
+ *
+ * Recovery's counterpart to {@link revokeAllCredentials}: the premise is that
+ * the old devices are gone, and "gone" usually means in somebody else's hands,
+ * so a found laptop must stop working. Keeping the new credential is what makes
+ * this a replacement rather than an offboarding.
+ *
+ * The caller must insert the replacement first. Called the other way round it
+ * would leave the person with nothing enrolled if the insert then failed —
+ * which is the one outcome recovery exists to prevent.
+ */
+export async function revokeAllCredentialsExcept(
+  userId: string,
+  keepCredentialRowId: string,
+): Promise<number> {
+  const result = await query(
+    `update webauthn_credentials set revoked_at = now()
+      where user_id = $1 and id <> $2 and revoked_at is null`,
+    [userId, keepCredentialRowId],
+  )
+  return result.rowCount ?? 0
+}
+
+/**
  * Record a successful authentication.
  *
  * A counter that fails to advance is how a cloned authenticator shows itself.
