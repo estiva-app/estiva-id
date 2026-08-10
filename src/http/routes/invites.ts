@@ -28,10 +28,10 @@ import {
   findInvite,
   listPendingInvites,
 } from '../../domain/invites.js'
-import { findUserByEmail, findUserById } from '../../domain/users.js'
-import { badRequest, conflict, forbidden } from '../../errors.js'
+import { findUserByEmail } from '../../domain/users.js'
+import { badRequest, conflict } from '../../errors.js'
 import type { AppEnv } from '../app.js'
-import { requireSession } from '../middleware/session.js'
+import { adminOnly } from '../middleware/admin.js'
 
 const createSchema = z.object({
   email: z.string().email(),
@@ -46,26 +46,11 @@ const createSchema = z.object({
   role: z.enum(['admin', 'member']).optional(),
 })
 
-/**
- * Only an admin may invite.
- *
- * Checked here rather than by middleware because it is the only route that
- * needs it today, and a middleware implies a policy that does not exist yet
- * (PEEK-34 is where roles become a real system).
- */
-async function requireAdmin(userId: string) {
-  const user = await findUserById(userId)
-  if (!user || user.status !== 'active') throw forbidden('That identity is no longer active')
-  if (user.role !== 'admin') throw forbidden('Only an admin can invite people')
-  return user
-}
-
 export function inviteRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
-  routes.post('/invites', requireSession, async (c) => {
+  routes.post('/invites', ...adminOnly, async (c) => {
     const { userId } = c.get('session')
-    await requireAdmin(userId)
 
     const parsed = createSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) {
@@ -119,8 +104,7 @@ export function inviteRoutes(): Hono<AppEnv> {
   })
 
   /** Outstanding invites, so a half-onboarded person is visible (PEEK-64). */
-  routes.get('/invites', requireSession, async (c) => {
-    await requireAdmin(c.get('session').userId)
+  routes.get('/invites', ...adminOnly, async (c) => {
     const invites = await listPendingInvites()
     return c.json({
       invites: invites.map((invite) => ({

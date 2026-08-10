@@ -68,10 +68,49 @@ export interface Me {
   email: string | null
   displayName: string | null
   status: 'active' | 'suspended' | 'offboarded'
+  /** What they may do while active — a different axis from `status`. */
+  role: 'admin' | 'member'
   pubkey: string | null
 }
 
 export const getMe = () => request<Me>('/me')
+
+// --- The directory (PEEK-64) -------------------------------------------------
+
+/**
+ * What is known about someone's standing at the relay.
+ *
+ * `unknown` is an answer, not a missing value. Buzz exposes no way to read
+ * membership, so it is the only honest one today — and rendering it as anything
+ * softer is what would make a half-offboarded person look fine.
+ */
+export type AdmissionStatus = 'admitted' | 'not-admitted' | 'unknown'
+
+/** How far through setup somebody is. See `src/domain/directory.ts`. */
+export type Enrolment = 'invited' | 'enrolling' | 'enrolled'
+
+export interface Person {
+  kind: 'user' | 'invite'
+  id: string
+  email: string | null
+  displayName: string | null
+  handle: string | null
+  nip05: string | null
+  pubkey: string | null
+  role: 'admin' | 'member'
+  status: 'active' | 'suspended' | 'offboarded' | null
+  enrolment: Enrolment
+  passkeyCount: number
+  lastSeenAt: string | null
+  createdAt: string
+  admission: AdmissionStatus
+  expiresAt: string | null
+}
+
+export const listPeople = () => request<{ people: Person[] }>('/admin/people').then((r) => r.people)
+
+export const getPerson = (id: string) =>
+  request<{ person: Person; credentials: Credential[] }>(`/admin/people/${encodeURIComponent(id)}`)
 
 // --- Profile ----------------------------------------------------------------
 
