@@ -380,6 +380,22 @@ caller does not choose whose signature it gets.
 { "event": { "id": "…", "pubkey": "…", "kind": 9, "created_at": …, "tags": […], "content": "…", "sig": "…" } }
 ```
 
+**Cross-origin**, from the same allowlist as `/token` and the directory — the
+registered redirect URIs, with `Access-Control-Allow-Credentials` never sent
+(`src/http/cors.ts`).
+
+This was missing until PEEK-93, and the omission was total: no `OPTIONS`
+handler, no header on the response. Ship's `estivaIdSigner` calls this from the
+browser with a Bearer header, which is **preflighted**, so every signed action
+failed with a generic network error and no status. A full passing suite said
+nothing about it, because nothing enforces CORS when a Hono app is called
+in-process.
+
+**The header is set before any refusal can be thrown**, so a `policy_violation`
+is readable by the app it refused. Otherwise "this app may not sign that kind"
+reaches the caller as "network error", which defeats the point of the
+`detail.reason` vocabulary below.
+
 Refusals (`422`, `detail.reason`):
 
 | `reason` | Meaning |

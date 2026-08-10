@@ -20,6 +20,30 @@
  *
  * `pubkey` is ignored on input and always set from the authenticated user's
  * key. A caller does not choose whose signature it gets.
+ *
+ * ## Cross-origin (PEEK-93)
+ *
+ * The callers are browser apps on other origins — Ship's `estivaIdSigner` does
+ * `fetch(origin + '/sign')` with a Bearer header, which is **preflighted**. This
+ * route shipped without an `OPTIONS` handler, so the browser never sent the
+ * POST and every signed action failed with a generic network error. Ship is a
+ * static bundle with no backend, so there was nowhere else for the call to come
+ * from.
+ *
+ * That is the PEEK-90 bug a second time, and it stayed invisible for the same
+ * reason: **nothing enforces CORS when a Hono app is called in-process**, so a
+ * full suite of passing tests says nothing about whether a browser can use this.
+ *
+ * The safety argument is unchanged from `/token` — see `http/cors.ts`. The
+ * allowlist is the registered redirect URIs, and `Allow-Credentials` is never
+ * sent, so the session cookie still cannot be used from another origin. `/sign`
+ * authenticates with a bearer token the caller already holds and sends
+ * explicitly; no ambient authority is shared by letting it read the reply.
+ *
+ * **The header goes on refusals too**, deliberately. A `policy_violation` that a
+ * browser will not let the app read turns "this app may not sign that kind"
+ * into "network error", which is the failure mode this endpoint's careful
+ * `detail.reason` vocabulary exists to avoid.
  */
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -32,6 +56,7 @@ import { evaluateSignPolicy } from '../../domain/policy.js'
 import { badRequest, forbidden, policyViolation, unauthenticated } from '../../errors.js'
 import { signEvent } from '../../nostr/keys.js'
 import type { AppEnv } from '../app.js'
+import { allowOrigin, preflight } from '../cors.js'
 
 const unsignedEventSchema = z.object({
   kind: z.number().int().min(0).max(65535),
@@ -54,9 +79,16 @@ function bearerToken(header: string | undefined): string {
 export function signRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
+  routes.options('/sign', preflight('POST, OPTIONS', 'authorization, content-type'))
+
   routes.post('/sign', async (c) => {
     const cfg = config()
     const requestId = c.get('requestId')
+
+    // Before anything that can throw, so a refusal is readable by the app that
+    // was refused. Sets the header only for a registered origin; a same-origin
+    // caller sends no Origin and needs none.
+    await allowOrigin(c)
 
     const { pubkey, clientId } = await verifyToken(bearerToken(c.req.header('authorization')))
 

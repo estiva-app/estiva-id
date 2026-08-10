@@ -239,3 +239,112 @@ describe('NIP-98 once the deployment allows the relay', () => {
     })
   })
 })
+
+/**
+ * PEEK-93: `/sign` shipped with no CORS at all, so Ship's `estivaIdSigner` —
+ * a browser `fetch` with a Bearer header, therefore preflighted — could never
+ * reach it.
+ *
+ * **These assertions are not the verification that counts.** Nothing enforces
+ * CORS when a Hono app is called in-process, which is exactly why the bug
+ * survived a full passing suite twice. They pin the headers; a browser on a
+ * second origin proves the feature.
+ */
+describe('cross-origin (PEEK-93)', () => {
+  const ORIGIN = 'http://localhost:5190'
+
+  beforeEach(async () => {
+    await query('update app_credentials set redirect_uris = $1 where client_id = $2', [
+      [`${ORIGIN}/callback`],
+      'estiva-peek',
+    ])
+  })
+
+  it('answers a preflight from a registered origin, allowing the Authorization header', async () => {
+    const response = await app.request('/sign', {
+      method: 'OPTIONS',
+      headers: {
+        origin: ORIGIN,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization',
+      },
+    })
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    expect(response.headers.get('access-control-allow-headers')).toContain('authorization')
+  })
+
+  it('refuses a preflight from an origin nobody registered', async () => {
+    const response = await app.request('/sign', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://attacker.example', 'access-control-request-method': 'POST' },
+    })
+    expect(response.status).toBe(403)
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  it('echoes the origin on a successful signature, and never allows credentials', async () => {
+    const response = await app.request('/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${peekToken}`,
+        origin: ORIGIN,
+      },
+      body: JSON.stringify({ event: { kind: 9, tags: [], content: 'hello' } }),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    // Never. Without it the browser will not attach the session cookie
+    // cross-origin, which is what keeps the cookie same-origin-only.
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull()
+    expect(response.headers.get('vary')).toContain('Origin')
+  })
+
+  /**
+   * The subtle half, and the reason `allowOrigin` runs before anything that can
+   * throw. A refusal a browser will not let the app read turns "this app may
+   * not sign that kind" into "network error" — which defeats the whole point of
+   * this endpoint's `detail.reason` vocabulary.
+   */
+  it('keeps the header on a policy refusal, so the app can read why', async () => {
+    const response = await app.request('/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${peekToken}`,
+        origin: ORIGIN,
+      },
+      // kind:0 — refused for every app, always.
+      body: JSON.stringify({ event: { kind: 0, tags: [], content: '{}' } }),
+    })
+    expect(response.status).toBe(422)
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'kind_profile_forbidden' } },
+    })
+  })
+
+  it('keeps the header on an unauthenticated refusal too', async () => {
+    const response = await app.request('/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({ event: { kind: 9, tags: [], content: 'hi' } }),
+    })
+    expect(response.status).toBe(401)
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+  })
+
+  it('does not echo an origin that is not registered', async () => {
+    const response = await app.request('/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${peekToken}`,
+        origin: 'https://attacker.example',
+      },
+      body: JSON.stringify({ event: { kind: 9, tags: [], content: 'hello' } }),
+    })
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+  })
+})
