@@ -47,9 +47,13 @@ export interface CreatedRecovery extends RecoveryToken {
 }
 
 export class RecoveryRefused extends Error {
-  constructor(readonly reason: 'no_such_person' | 'not_active') {
+  constructor(readonly reason: 'no_such_person' | 'not_active' | 'not_a_person') {
     super(
-      reason === 'no_such_person' ? 'No such person' : 'Only an active identity can be recovered',
+      {
+        no_such_person: 'No such person',
+        not_active: 'Only an active identity can be recovered',
+        not_a_person: 'A role identity has no passkey to recover',
+      }[reason],
     )
     this.name = 'RecoveryRefused'
   }
@@ -76,6 +80,13 @@ export async function createRecovery(input: {
   const user = await findUserById(input.userId)
   if (!user) throw new RecoveryRefused('no_such_person')
   if (user.status !== 'active') throw new RecoveryRefused('not_active')
+  /*
+    A role identity has no passkey and never will, so there is nothing to
+    recover — and a link that enrolled one would be worse than useless: it would
+    hand whoever opened it a credential that signs as the bot, permanently and
+    with no human whose absence would ever be noticed (PEEK-34).
+  */
+  if (user.kind !== 'human') throw new RecoveryRefused('not_a_person')
 
   await query(
     'update recovery_tokens set consumed_at = now() where user_id = $1 and consumed_at is null',

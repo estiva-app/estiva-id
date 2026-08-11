@@ -39,6 +39,7 @@ import { recordAudit } from '../../domain/audit.js'
 import { redeemAuthorizationCode } from '../../domain/authorization.js'
 import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { authenticateServiceCredential } from '../../domain/roles.js'
 import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden, unauthenticated } from '../../errors.js'
@@ -53,6 +54,19 @@ const codeGrantSchema = z.object({
   clientId: z.string().min(1),
   redirectUri: z.string().url(),
   codeVerifier: z.string().min(43).max(128),
+})
+
+/**
+ * The client-credentials grant, for role identities (PEEK-34).
+ *
+ * No `redirectUri` and no `codeVerifier`: there is no browser and no person to
+ * send anywhere. The app *is* the principal's custodian, which is exactly why
+ * it must present a secret — and why only a server-side client may hold one.
+ */
+const serviceGrantSchema = z.object({
+  grantType: z.literal('client_credentials'),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
 })
 
 /** The token body every grant returns. */
@@ -108,6 +122,9 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     const codeGrant = codeGrantSchema.safeParse(body)
     if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
+
+    const serviceGrant = serviceGrantSchema.safeParse(body)
+    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
 
     // Not the code grant. If it *looked* like one, say so rather than falling
     // through to a confusing "no session cookie" — a client with a malformed
@@ -244,6 +261,60 @@ export function tokenRoutes(): Hono<AppEnv> {
       outcome: 'success',
       subjectPubkey: pubkey,
       detail: { expiresIn: issued.expiresIn },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json(tokenResponse(issued))
+  }
+
+  /**
+   * `grant_type=client_credentials` — how a bot signs (PEEK-34).
+   *
+   * The app authenticates as itself and receives a token for the role identity
+   * it is registered to act as. There is no person anywhere in this flow, which
+   * is the point: a role has nobody to sign in, and before this it could hold a
+   * key it could never use.
+   *
+   * **The secret buys a ten-minute token, it is not one.** That keeps the same
+   * TTL every other grant has, so offboarding a bot takes effect just as fast as
+   * offboarding a person, and nothing long-lived travels on a signing request.
+   *
+   * Refusals are deliberately indistinguishable to the caller — unknown client,
+   * wrong secret, public client, offboarded identity all answer the same. Which
+   * one it was matters to us and is in the audit log; telling the caller turns
+   * this endpoint into an oracle for enumerating credentials.
+   */
+  async function exchangeClientCredentials(
+    c: Context<AppEnv>,
+    input: z.infer<typeof serviceGrantSchema>,
+  ) {
+    const credential = await authenticateServiceCredential(input.clientId, input.clientSecret)
+    if (!credential) {
+      await recordAudit({
+        actorType: 'app',
+        actorClientId: input.clientId,
+        action: 'token.issue',
+        outcome: 'refused',
+        detail: { reason: 'invalid_client', grant: 'client_credentials' },
+        requestId: c.get('requestId'),
+      })
+      throw unauthenticated('invalid_client')
+    }
+
+    if (!credential.pubkey) throw forbidden('No active key for this identity')
+
+    const issued = await issueToken({ pubkey: credential.pubkey, clientId: credential.clientId })
+
+    await recordAudit({
+      actorType: 'app',
+      // The identity acted for, not a person who acted — there is none. Recording
+      // it is what lets the audit trail answer "what has this bot been doing".
+      actorUserId: credential.actsAsUserId,
+      actorClientId: credential.clientId,
+      action: 'token.issue',
+      outcome: 'success',
+      subjectPubkey: credential.pubkey,
+      detail: { expiresIn: issued.expiresIn, grant: 'client_credentials' },
       requestId: c.get('requestId'),
     })
 

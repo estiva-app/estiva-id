@@ -20,7 +20,7 @@
  * status, how far enrolment got, and admission. A person is only "fine" when all
  * three agree, and this screen refuses to imply that when they do not.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { AuditLog } from './AuditLog'
 import {
   type AdmissionStatus,
@@ -29,8 +29,10 @@ import {
   type Enrolment,
   type OffboardResult,
   type Person,
+  createRoleIdentity,
   getPerson,
   issueRecovery,
+  issueServiceCredential,
   listPeople,
   offboardPerson,
 } from './api'
@@ -57,6 +59,16 @@ const ENROLMENT: Record<Enrolment, { label: string; tone: string; note: string }
     note: 'They opened the link and never finished adding a passkey. The account and its key exist; they cannot sign in.',
   },
   enrolled: { label: 'Enrolled', tone: 'ok', note: 'Has at least one passkey.' },
+  /*
+    A role identity is not part-way through setup — setup does not apply to it.
+    Without this it derives as "Never signed in", which reads as "cannot get in
+    and does not know it" and sends an admin chasing a bot that works (PEEK-34).
+  */
+  'not-applicable': {
+    label: 'Service',
+    tone: 'muted',
+    note: 'A role identity. It signs with a client credential and has no passkey by design.',
+  },
 }
 
 /**
@@ -109,8 +121,12 @@ export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
 
   // Counted from everyone, not from the filtered view: a summary that changes
   // as you type is describing your search rather than your workspace.
+  // Role identities are excluded: they are never "enrolled" and never will be,
+  // so counting them would put a permanent number next to "not fully set up"
+  // that no action can ever clear — which teaches people to ignore it.
   const needAttention = state.people.filter(
-    (person) => person.enrolment !== 'enrolled' || person.status === 'offboarded',
+    (person) =>
+      person.kind !== 'role' && (person.enrolment !== 'enrolled' || person.status === 'offboarded'),
   ).length
 
   return (
@@ -138,7 +154,75 @@ export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
           <PersonRow key={`${person.kind}:${person.id}`} person={person} onOpen={onOpen} />
         ))}
       </ul>
+
+      {/*
+        Below the list rather than above it: creating a bot is rare, and the
+        list is what an admin came for.
+      */}
+      <NewRoleIdentity onCreated={onOpen} />
     </>
+  )
+}
+
+/**
+ * Creating a bot, a `support@`, an agent (PEEK-34).
+ *
+ * Deliberately not part of "add a person": there is no invite, no email and no
+ * passkey, because there is nobody to enrol. What comes out is a custodied key
+ * with a profile and no way to sign in — and the credential that lets a
+ * server-side app sign as it is minted separately, on the identity's own page,
+ * because it is the part with a secret in it.
+ */
+function NewRoleIdentity({ onCreated }: { onCreated: (id: string) => void }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function create(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const { identity } = await createRoleIdentity(name.trim())
+      setName('')
+      onCreated(identity.id)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not create that identity')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Add a service identity</h2>
+      </div>
+      <p className="card-note">
+        A bot, an agent, a shared address. It gets its own key and profile like anyone else, and{' '}
+        <strong>no passkey</strong> — nobody signs in as it. Mint its credential from its page
+        afterwards.
+      </p>
+
+      {error && <div className="notice error">{error}</div>}
+
+      <form onSubmit={create}>
+        <label>
+          <span className="label-text">Name</span>
+          <input
+            type="text"
+            value={name}
+            placeholder="Release Bot"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <div className="row">
+          <button type="submit" disabled={busy || name.trim() === ''}>
+            {busy ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </section>
   )
 }
 
@@ -148,7 +232,7 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: (id: string) =>
 
   // An unopened invite has no account to open — no key, no passkeys, no
   // history. Everything known about it is already on this row.
-  const openable = person.kind === 'user'
+  const openable = person.kind === 'user' || person.kind === 'role'
 
   // Somebody who never set a display name is headlined by their email, so
   // repeating it underneath is noise — and it pushes the facts that differ
@@ -157,7 +241,11 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: (id: string) =>
   const meta = [
     person.email === name ? null : (person.email ?? 'No email'),
     person.nip05,
-    person.lastSeenAt ? `last seen ${formatDate(person.lastSeenAt)}` : 'never seen',
+    person.kind === 'role'
+      ? null
+      : person.lastSeenAt
+        ? `last seen ${formatDate(person.lastSeenAt)}`
+        : 'never seen',
   ].filter((part): part is string => part !== null)
 
   return (
@@ -166,6 +254,8 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: (id: string) =>
         <div className="person-name">
           {name}
           {person.role === 'admin' && <span className="badge role">Admin</span>}
+          {/* Said once, plainly. A bot among people is the fact worth seeing. */}
+          {person.kind === 'role' && <span className="badge role">Service</span>}
         </div>
         <div className="cred-meta">{meta.join(' · ')}</div>
       </div>
@@ -332,6 +422,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         )}
       </section>
 
+      <CredentialCard person={person} />
+
       <RecoveryCard person={person} />
 
       <OffboardCard
@@ -369,6 +461,120 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
  * no mailer in Stage 1, so an admin copies it into a DM, exactly as with an
  * invite.
  */
+/**
+ * The credential a bot authenticates with (PEEK-34).
+ *
+ * Shown only for a role identity, because issuing one for a person would be a
+ * way to act as them without their passkey — refused by the server, and not
+ * offered here either.
+ *
+ * **The secret appears once.** Only its hash is stored, so a lost secret is
+ * re-minted rather than looked up, and re-minting replaces the old one rather
+ * than leaving two live.
+ */
+function CredentialCard({ person }: { person: Person }) {
+  const [issued, setIssued] = useState<{ clientId: string; clientSecret: string } | null>(null)
+  const [clientId, setClientId] = useState('')
+  const [kinds, setKinds] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  if (person.kind !== 'role') return null
+
+  async function mint(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      setIssued(
+        await issueServiceCredential(person.id, {
+          clientId: clientId.trim(),
+          name: person.displayName ?? clientId.trim(),
+          allowedKinds: kinds
+            .split(',')
+            .map((part) => Number(part.trim()))
+            .filter((kind) => Number.isInteger(kind) && kind >= 0),
+        }),
+      )
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not mint a credential')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Service credential</h2>
+      </div>
+      <p className="card-note">
+        A server-side app exchanges this for a short-lived token and signs as this identity. It is{' '}
+        <strong>not for browser apps</strong> — a secret in a bundle is not a secret.
+      </p>
+
+      {issued ? (
+        <>
+          <div className="notice">
+            Copy the secret now. Only its hash is stored, so it cannot be shown again — mint a new
+            one if it is lost, which replaces this.
+          </div>
+          <dl className="facts">
+            <dt>Client id</dt>
+            <dd className="mono">{issued.clientId}</dd>
+            <dt>Secret</dt>
+            <dd className="mono">{issued.clientSecret}</dd>
+          </dl>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(issued.clientSecret).then(() => setCopied(true))
+              }}
+            >
+              {copied ? 'Copied' : 'Copy secret'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {error && <div className="notice error">{error}</div>}
+          <form onSubmit={mint}>
+            <label>
+              <span className="label-text">Client id</span>
+              <input
+                type="text"
+                value={clientId}
+                placeholder="release-bot"
+                onChange={(event) => setClientId(event.target.value)}
+              />
+            </label>
+            <label>
+              <span className="label-text">Kinds it may sign</span>
+              <input
+                type="text"
+                value={kinds}
+                placeholder="1, 9, 27235"
+                onChange={(event) => setKinds(event.target.value)}
+              />
+              <p className="hint">
+                Comma separated. The same per-app ceiling every other credential has — 27235 is
+                NIP-98, without which it cannot reach the relay's bridge at all.
+              </p>
+            </label>
+            <div className="row">
+              <button type="submit" disabled={busy || clientId.trim() === ''}>
+                {busy ? 'Minting…' : 'Mint a credential'}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </section>
+  )
+}
+
 function RecoveryCard({ person }: { person: Person }) {
   const [issued, setIssued] = useState<{ url: string; expiresAt: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -378,6 +584,9 @@ function RecoveryCard({ person }: { person: Person }) {
   // Offboarding revokes every passkey, so "restore their passkey" is exactly
   // the mistake a recovery link would be. Reinstating is a status change first.
   if (person.status && person.status !== 'active') return null
+  // A role has no passkey to recover, and a link that enrolled one would hand
+  // whoever opened it something that signs as the bot forever (PEEK-34).
+  if (person.kind === 'role') return null
 
   async function issue() {
     setBusy(true)

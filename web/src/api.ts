@@ -87,10 +87,11 @@ export const getMe = () => request<Me>('/me')
 export type AdmissionStatus = 'admitted' | 'not-admitted' | 'unknown'
 
 /** How far through setup somebody is. See `src/domain/directory.ts`. */
-export type Enrolment = 'invited' | 'enrolling' | 'enrolled'
+export type Enrolment = 'invited' | 'enrolling' | 'enrolled' | 'not-applicable'
 
 export interface Person {
-  kind: 'user' | 'invite'
+  /** `role` is an account with a key and no way to sign in (PEEK-34). */
+  kind: 'user' | 'invite' | 'role'
   id: string
   email: string | null
   displayName: string | null
@@ -130,6 +131,26 @@ export interface OffboardResult {
 
 export const offboardPerson = (id: string) =>
   request<OffboardResult>(`/admin/people/${encodeURIComponent(id)}/offboard`, { method: 'POST' })
+
+// --- Role identities (PEEK-34) ----------------------------------------------
+
+// `role-identities`, not `roles`: API routes mount before the UI catch-all, so
+// a client route sharing a literal segment with one is swallowed by it.
+export const createRoleIdentity = (displayName: string) =>
+  request<{ identity: { id: string; pubkey: string } }>('/admin/role-identities', {
+    method: 'POST',
+    body: JSON.stringify({ displayName }),
+  })
+
+/** The secret comes back once and is stored only as a hash. */
+export const issueServiceCredential = (
+  id: string,
+  input: { clientId: string; name: string; allowedKinds: number[] },
+) =>
+  request<{ clientId: string; clientSecret: string; pubkey: string | null }>(
+    `/admin/role-identities/${encodeURIComponent(id)}/credential`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
 
 // --- The audit trail (PEEK-69) ----------------------------------------------
 

@@ -20,23 +20,29 @@ export interface User {
    * unrepresentable (PEEK-65).
    */
   role: 'admin' | 'member'
+  /**
+   * What sort of principal this is — a third axis again (PEEK-34).
+   *
+   * `human` custody is a temporary trade Stage 4 unwinds; `role` custody is
+   * correct forever, because there is no human to hold the key. Undifferentiated,
+   * Stage 4 would have no way to tell which rows to migrate.
+   */
+  kind: 'human' | 'role'
 }
 
 export interface UserWithPubkey extends User {
   pubkey: string
 }
 
+/** Every column the `User` shape needs, in one place so the two reads agree. */
+const USER_COLUMNS = 'id, email, display_name, status, role, kind'
+
 export async function findUserByEmail(email: string): Promise<User | undefined> {
-  return queryOne<User>(
-    'select id, email, display_name, status, role from users where lower(email) = lower($1)',
-    [email],
-  )
+  return queryOne<User>(`select ${USER_COLUMNS} from users where lower(email) = lower($1)`, [email])
 }
 
 export async function findUserById(id: string): Promise<User | undefined> {
-  return queryOne<User>('select id, email, display_name, status, role from users where id = $1', [
-    id,
-  ])
+  return queryOne<User>(`select ${USER_COLUMNS} from users where id = $1`, [id])
 }
 
 /**
@@ -145,15 +151,26 @@ async function activePubkeyFor(userId: string): Promise<string | undefined> {
  * represent, so both happen or neither does.
  */
 export async function createUserWithKey(input: {
-  email: string
+  /**
+   * Optional, because a role identity need not have one (PEEK-34). A human
+   * always does — it arrives from the invite, which is what makes an enrolment
+   * link non-transferable.
+   */
+  email?: string | null
   displayName?: string | undefined
   role?: 'admin' | 'member'
+  kind?: 'human' | 'role'
 }): Promise<UserWithPubkey> {
   return withTransaction(async (client) => {
     const inserted = await client.query<User>(
-      `insert into users (email, display_name, role) values ($1, $2, $3)
-       returning id, email, display_name, status, role`,
-      [input.email, input.displayName ?? null, input.role ?? 'member'],
+      `insert into users (email, display_name, role, kind) values ($1, $2, $3, $4)
+       returning ${USER_COLUMNS}`,
+      [
+        input.email ?? null,
+        input.displayName ?? null,
+        input.role ?? 'member',
+        input.kind ?? 'human',
+      ],
     )
     const user = inserted.rows[0]
     if (!user) throw new Error('user insert returned no row')
