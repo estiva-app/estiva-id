@@ -103,6 +103,27 @@ const schema = z.object({
     .transform((raw) => raw.trim().toLowerCase().replace(/\.$/, '')),
 
   /**
+   * The identity whose custodied key signs relay-operator actions (PEEK-94).
+   *
+   * Reading the roster and adding or removing members are all restricted by
+   * Buzz to relay `owner`/`admin`, so they cannot be signed as the person being
+   * acted on — who is very often precisely the one who is *not* a member. They
+   * are signed as an operator instead.
+   *
+   * A **role identity** (PEEK-34) is the right shape for it: org-custodied
+   * outright, no passkey, nobody to sign in as it. Bootstrapping is one manual
+   * step, because the first admission cannot be granted by the thing asking for
+   * it — create the role identity, then admit its pubkey at the relay:
+   *
+   *   docker exec buzz-prod-relay-1 buzz-admin add-member --pubkey <hex> --role admin
+   *
+   * Empty means relay membership stays unobservable and offboarding keeps
+   * printing a command for a human. That is the pre-PEEK-94 behaviour, and it
+   * is the honest fallback rather than a broken one.
+   */
+  RELAY_OPERATOR_USER_ID: z.string().default(''),
+
+  /**
    * Where each app may be sent back to after `/authorize` (PEEK-90),
    * comma-separated and matched **exactly**.
    *

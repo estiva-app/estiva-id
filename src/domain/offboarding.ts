@@ -47,6 +47,7 @@ import { recordAudit } from './audit.js'
 import { revokeAllCredentials } from './credentials.js'
 import { getActivePubkey } from './keys.js'
 import { getProfile, publishProfile, saveProfile } from './profile.js'
+import { removeMemberCommand, revokeMember } from './relay-membership.js'
 import { findUserById, setUserStatus } from './users.js'
 
 export interface OffboardResult {
@@ -64,14 +65,23 @@ export interface OffboardResult {
   attestationPublished: boolean
   publishError?: string | undefined
   /**
-   * Always present, always outstanding. Not an error — a step this service is
-   * not the owner of, named so it cannot be forgotten.
+   * The fourth step, which used to be somebody else's problem (PEEK-94).
+   *
+   * Buzz still *owns* admission — this publishes a signed kind:9031 through the
+   * bridge and the relay decides, exactly as PEEK-36 intended. What changed is
+   * that the decision can now be asked for, rather than printed as a command
+   * and hoped for.
+   *
+   * `revoked: false` is still reachable — no operator identity configured, the
+   * relay unreachable, the operator not an admin — and when it is, the command
+   * comes back so the step is still completable by hand. A step that silently
+   * did not happen is the failure this whole ticket exists to prevent.
    */
   relayAdmission: {
-    revoked: false
-    reason: 'buzz_owns_admission'
-    /** Run this on the box, inside the relay container. */
-    command: string
+    revoked: boolean
+    reason?: string
+    /** Present whenever `revoked` is false: run this on the box. */
+    command?: string
   }
 }
 
@@ -90,14 +100,14 @@ export class NoSuchPerson extends Error {
 }
 
 /**
- * The command an operator still has to run.
+ * The command an operator has to run **when this service could not**.
  *
  * Built with the pubkey filled in, because the failure this whole ticket exists
  * to prevent is somebody not completing a step — and "look up their pubkey,
  * then construct a command" is two more chances to stop.
  */
 export function revokeAdmissionCommand(pubkey: string | null): string {
-  return `docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey ${pubkey ?? '<pubkey>'}`
+  return removeMemberCommand(pubkey)
 }
 
 export async function offboardPerson(
@@ -131,6 +141,20 @@ export async function offboardPerson(
     attestationPublished = true
   }
 
+  /*
+    The fourth step (PEEK-94). Last, because it is the one that can fail for
+    reasons outside this service — and the three above must not be held hostage
+    to the relay being reachable. A leaver with their passkeys revoked and their
+    handle withdrawn is already mostly out; this closes the half that was
+    silent.
+
+    A pubkey nobody ever admitted is `alreadyInState`, not a failure: the end
+    state is what was asked for.
+  */
+  const admissionResult = pubkey
+    ? await revokeMember(pubkey)
+    : { ok: false, reason: 'no active key for this identity' }
+
   await recordAudit({
     actorType: by.actorUserId ? 'user' : 'system',
     actorUserId: by.actorUserId,
@@ -147,7 +171,8 @@ export async function offboardPerson(
       handleRevoked: handle,
       attestationPublished,
       ...(publishError ? { publishError } : {}),
-      relayAdmissionRevoked: false,
+      relayAdmissionRevoked: admissionResult.ok,
+      ...(admissionResult.ok ? {} : { relayAdmissionError: admissionResult.reason }),
     },
     requestId: by.requestId,
   })
@@ -160,10 +185,14 @@ export async function offboardPerson(
     handleRevoked: handle,
     attestationPublished,
     publishError,
-    relayAdmission: {
-      revoked: false,
-      reason: 'buzz_owns_admission',
-      command: revokeAdmissionCommand(pubkey),
-    },
+    relayAdmission: admissionResult.ok
+      ? { revoked: true }
+      : {
+          revoked: false,
+          reason: admissionResult.reason ?? 'unknown',
+          // Still handed back, so a failure here is completable by hand rather
+          // than merely reported.
+          command: revokeAdmissionCommand(pubkey),
+        },
   }
 }

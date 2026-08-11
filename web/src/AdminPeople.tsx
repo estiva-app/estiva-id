@@ -684,13 +684,24 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
     }
   }
 
-  // The command outlives the request that produced it: an admin who reloads
-  // still has somebody to remove from the relay.
-  const command =
-    result?.relayAdmission.command ??
-    (gone && person.pubkey
-      ? `docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey ${person.pubkey}`
-      : null)
+  /*
+    The command is shown only when the relay step did *not* happen (PEEK-94).
+
+    Before, it always did not happen, so the command was unconditional. Now a
+    successful offboarding revokes admission itself — and printing "go run this"
+    beside a step that already completed would send an admin to do something
+    already done, which is its own kind of wrong.
+
+    The fallback still covers a reload: an admin who refreshes after a *failed*
+    relay step has no `result` in hand, and still needs somebody removed.
+  */
+  const admissionRevoked = result?.relayAdmission.revoked === true
+  const command = admissionRevoked
+    ? null
+    : ((result?.relayAdmission.revoked === false ? result.relayAdmission.command : undefined) ??
+      (gone && person.pubkey
+        ? `docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey ${person.pubkey}`
+        : null))
 
   return (
     <section className="card">
@@ -707,6 +718,13 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
         </div>
       )}
 
+      {admissionRevoked && (
+        <div className="notice ok">
+          Their admission to the relay was withdrawn, so they can no longer read or write there
+          either. All four steps are done.
+        </div>
+      )}
+
       {result && !result.attestationPublished && (
         <div className="notice error">
           The profile withdrawing their handle did not reach the relay
@@ -719,9 +737,10 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
       {command ? (
         <>
           <div className="notice warn">
-            <strong>Not finished.</strong> The relay still admits this person, and Estiva ID cannot
-            change that — Buzz owns admission and offers no API for it. Until somebody runs this,
-            they can still read and write on the relay with the key they kept.
+            <strong>Not finished.</strong> The relay still admits this person
+            {result?.relayAdmission.revoked === false ? ` (${result.relayAdmission.reason})` : ''}.
+            Until somebody runs this, they can still read and write on the relay with the key they
+            kept.
           </div>
           <div className="row">
             <code className="command">{command}</code>

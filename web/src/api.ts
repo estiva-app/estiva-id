@@ -80,9 +80,10 @@ export const getMe = () => request<Me>('/me')
 /**
  * What is known about someone's standing at the relay.
  *
- * `unknown` is an answer, not a missing value. Buzz exposes no way to read
- * membership, so it is the only honest one today — and rendering it as anything
- * softer is what would make a half-offboarded person look fine.
+ * `unknown` is an answer, not a missing value — and it survived PEEK-94, which
+ * made the other two reachable. A relay that cannot be answered from still
+ * produces it, and rendering it as anything softer is what would make a
+ * half-offboarded person look fine.
  */
 export type AdmissionStatus = 'admitted' | 'not-admitted' | 'unknown'
 
@@ -123,10 +124,13 @@ export interface OffboardResult {
   attestationPublished: boolean
   publishError?: string | null
   /**
-   * Always outstanding. Buzz owns admission and exposes no way to drive it, so
-   * this carries the command an operator still has to run.
+   * The fourth step, which this service can now take (PEEK-94).
+   *
+   * `revoked: false` is still reachable — no operator identity configured, the
+   * relay unreachable, the operator not an admin — and then `command` comes
+   * back so the step stays completable by hand.
    */
-  relayAdmission: { revoked: false; reason: string; command: string }
+  relayAdmission: { revoked: true } | { revoked: false; reason: string; command: string }
 }
 
 export const offboardPerson = (id: string) =>
