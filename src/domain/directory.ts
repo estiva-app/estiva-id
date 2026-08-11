@@ -51,14 +51,27 @@ import type { User } from './users.js'
  * labelled every leaver "never signed in" — which is false, and falsest exactly
  * where it matters: on the screen an admin checks after removing somebody.
  */
-export type Enrolment = 'invited' | 'enrolling' | 'enrolled'
+/**
+ * `not-applicable` is for role identities (PEEK-34).
+ *
+ * A bot has no passkey and never will, so every human enrolment state is a lie
+ * about it — and the most damaging is `enrolling`, which the derivation would
+ * otherwise produce: it renders as "Never signed in" and counts towards "not
+ * fully set up", telling an admin to chase somebody who does not exist. A role
+ * is not part-way through setup; setup does not apply to it.
+ */
+export type Enrolment = 'invited' | 'enrolling' | 'enrolled' | 'not-applicable'
 
 export interface DirectoryEntry {
   /**
    * `invite` rows are not accounts yet — no key, no pubkey, nothing to open.
    * The id is the invite's, so the two id spaces never collide.
+   *
+   * `role` is an account, with a key and a profile, and no way to sign in.
+   * Distinguishing it here rather than by a flag is what stops every screen
+   * having to remember to ask (PEEK-34).
    */
-  kind: 'user' | 'invite'
+  kind: 'user' | 'invite' | 'role'
   id: string
   email: string | null
   displayName: string | null
@@ -79,12 +92,25 @@ export interface DirectoryEntry {
   expiresAt: string | null
 }
 
+/**
+ * The enrolment state for one account row.
+ *
+ * Split out because both reads derive it and they must agree — the list and the
+ * detail view disagreeing about whether somebody is set up is the kind of bug
+ * that gets argued about rather than noticed.
+ */
+function roleEnrolment(row: { kind: User['kind']; ever_enrolled: boolean }): Enrolment {
+  if (row.kind === 'role') return 'not-applicable'
+  return row.ever_enrolled ? 'enrolled' : 'enrolling'
+}
+
 interface PersonRow {
   id: string
   email: string | null
   display_name: string | null
   status: User['status']
   role: User['role']
+  kind: User['kind']
   handle: string | null
   pubkey: string | null
   passkey_count: string
@@ -109,6 +135,7 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
             u.display_name,
             u.status,
             u.role,
+            u.kind,
             h.handle,
             k.pubkey,
             (select count(*)
@@ -152,7 +179,7 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
   const admission = await admissionPort().getAdmissionStatuses(pubkeys)
 
   const entries: DirectoryEntry[] = people.rows.map((row) => ({
-    kind: 'user',
+    kind: row.kind === 'role' ? 'role' : 'user',
     id: row.id,
     email: row.email,
     displayName: row.display_name,
@@ -161,7 +188,10 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
     pubkey: row.pubkey,
     role: row.role,
     status: row.status,
-    enrolment: row.ever_enrolled ? 'enrolled' : 'enrolling',
+    // A role has no passkey and never will, so the human ladder does not apply.
+    // Deriving it would produce `enrolling`, which reads as "cannot get in and
+    // does not know it" — an admin chasing a bot that is working perfectly.
+    enrolment: roleEnrolment(row),
     passkeyCount: Number(row.passkey_count),
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -280,6 +310,7 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
             u.display_name,
             u.status,
             u.role,
+            u.kind,
             h.handle,
             k.pubkey,
             (select count(*)
@@ -301,7 +332,7 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
   if (!row) return undefined
 
   return {
-    kind: 'user',
+    kind: row.kind === 'role' ? 'role' : 'user',
     id: row.id,
     email: row.email,
     displayName: row.display_name,
@@ -310,7 +341,10 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
     pubkey: row.pubkey,
     role: row.role,
     status: row.status,
-    enrolment: row.ever_enrolled ? 'enrolled' : 'enrolling',
+    // A role has no passkey and never will, so the human ladder does not apply.
+    // Deriving it would produce `enrolling`, which reads as "cannot get in and
+    // does not know it" — an admin chasing a bot that is working perfectly.
+    enrolment: roleEnrolment(row),
     passkeyCount: Number(row.passkey_count),
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),

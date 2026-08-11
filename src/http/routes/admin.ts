@@ -15,6 +15,7 @@
  * might want still live as domain functions with their own tickets.
  */
 import { Hono } from 'hono'
+import { z } from 'zod'
 import { config } from '../../config.js'
 import { auditActions, effectiveLimit, listAudit } from '../../domain/audit-log.js'
 import { recordAudit } from '../../domain/audit.js'
@@ -23,9 +24,27 @@ import { getDirectoryEntry, listDirectory } from '../../domain/directory.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { AlreadyOffboarded, NoSuchPerson, offboardPerson } from '../../domain/offboarding.js'
 import { RecoveryRefused, createRecovery } from '../../domain/recovery.js'
+import { RoleRefused, createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { adminOnly } from '../middleware/admin.js'
+
+const createRoleSchema = z.object({
+  displayName: z.string().min(1).max(200),
+  email: z.string().email().optional(),
+})
+
+const credentialSchema = z.object({
+  clientId: z
+    .string()
+    .min(1)
+    .max(100)
+    // The same shape the seeded apps use. A client id with spaces or a slash
+    // would work everywhere except in the places it gets embedded in a URL.
+    .regex(/^[a-z0-9][a-z0-9-]*$/, 'Lowercase letters, digits and dashes'),
+  name: z.string().min(1).max(200),
+  allowedKinds: z.array(z.number().int().nonnegative()).max(50),
+})
 
 export function adminRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
@@ -178,6 +197,87 @@ export function adminRoutes(): Hono<AppEnv> {
         // Recovering a suspended or offboarded identity would be a way back in
         // that bypasses the decision to take access away. Reinstating somebody
         // is a status change first, deliberately a separate act.
+        throw conflict(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+  })
+
+  /**
+   * Create a role identity (PEEK-34).
+   *
+   * **`role-identities`, not `roles`.** API routes mount before the UI
+   * catch-all, so any client route sharing a literal segment with one is
+   * swallowed by it — the trap that served the audit *JSON* to a browser on
+   * PEEK-69. Leaving `/admin/roles` unclaimed keeps it available as a screen.
+   */
+  routes.post('/admin/role-identities', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const body = createRoleSchema.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) throw badRequest('Expected { displayName }')
+
+    const identity = await createRoleIdentity({
+      displayName: body.data.displayName,
+      email: body.data.email ?? null,
+    })
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId,
+      action: 'role.create',
+      outcome: 'success',
+      subjectPubkey: identity.pubkey,
+      detail: { subjectUserId: identity.id, displayName: identity.display_name },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json({ identity: { id: identity.id, pubkey: identity.pubkey } })
+  })
+
+  /**
+   * Mint the credential a bot authenticates with.
+   *
+   * The secret is returned once and stored only as a hash. Re-issuing replaces
+   * it rather than adding a second, so rotation leaves exactly one live secret
+   * — two would be a state somebody has to reason about during an incident.
+   */
+  routes.post('/admin/role-identities/:id/credential', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const body = credentialSchema.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) throw badRequest('Expected { clientId, name, allowedKinds }')
+
+    try {
+      const credential = await issueServiceCredential({
+        userId: c.req.param('id'),
+        clientId: body.data.clientId,
+        name: body.data.name,
+        allowedKinds: body.data.allowedKinds,
+      })
+
+      await recordAudit({
+        actorType: 'user',
+        actorUserId,
+        action: 'role.credential',
+        outcome: 'success',
+        subjectPubkey: credential.pubkey ?? undefined,
+        // Never the secret. It signs as the identity, and the audit log has a
+        // wider readership than the one admin who minted it.
+        detail: {
+          subjectUserId: credential.actsAsUserId,
+          clientId: credential.clientId,
+          allowedKinds: body.data.allowedKinds,
+        },
+        requestId: c.get('requestId'),
+      })
+
+      return c.json({
+        clientId: credential.clientId,
+        clientSecret: credential.secret,
+        pubkey: credential.pubkey,
+      })
+    } catch (error) {
+      if (error instanceof RoleRefused) {
+        if (error.reason === 'no_such_identity') throw notFound('No such identity')
         throw conflict(error.message, { reason: error.reason })
       }
       throw error
