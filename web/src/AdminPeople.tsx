@@ -27,12 +27,14 @@ import {
   type AdmissionUnknownReason,
   type AdmitResult,
   ApiError,
+  type CreatedInvite,
   type Credential,
   type Enrolment,
   type OffboardResult,
   type Person,
   type ReinstateResult,
   admitToRelay,
+  createInvite,
   createRoleIdentity,
   getPerson,
   issueRecovery,
@@ -218,11 +220,177 @@ export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
       </ul>
 
       {/*
-        Below the list rather than above it: creating a bot is rare, and the
-        list is what an admin came for.
+        Below the list rather than above it: the list is what an admin came for.
+        Adding a person comes first of the two, because it is the ordinary act
+        and creating a bot is rare.
       */}
+      <InvitePerson />
       <NewRoleIdentity onCreated={onOpen} />
     </>
+  )
+}
+
+/**
+ * Adding a colleague (PEEK-65).
+ *
+ * The server has had `POST /invites` since invites shipped, and **nothing in
+ * this app ever called it** — so the one action the admin console exists for
+ * was reachable only by curl or by the bootstrap script over SSH. The people
+ * list showed pending invites it gave you no way to create.
+ *
+ * **There is no mailer, on purpose** (Stage 1 is internal). The link comes back
+ * once and the admin copies it into a DM, which is why the result is a panel
+ * that stays on screen rather than a toast that passes: only the token's hash
+ * is stored, so a link scrolled past is a link reissued.
+ *
+ * Email is the only required field. A name and a handle are the admin's to
+ * reserve now or leave for the person to set later, and the role default is
+ * `member` because the alternative grants this very screen.
+ */
+function InvitePerson() {
+  const [email, setEmail] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [handle, setHandle] = useState('')
+  const [role, setRole] = useState<'admin' | 'member'>('member')
+  const [created, setCreated] = useState<CreatedInvite | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  async function invite(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await createInvite({
+        email: email.trim(),
+        ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+        ...(handle.trim() ? { handle: handle.trim() } : {}),
+        role,
+      })
+      setCreated(result)
+      setEmail('')
+      setDisplayName('')
+      setHandle('')
+      setRole('member')
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? // `409` is the useful one: an address that can already sign in does
+            // not need an invite, and issuing one would imply a second identity
+            // for the same person.
+            caught.message
+          : 'Could not create that invite',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Add a person</h2>
+      </div>
+      <p className="card-note">
+        They get a link, open it, and enrol a passkey. <strong>No password</strong> is created or
+        sent — there isn’t one in this design. Their key is minted and admitted to the relay when
+        they finish.
+      </p>
+
+      {created ? (
+        <>
+          <div className="notice">
+            Send this to {created.email} directly. It works <strong>once</strong> and expires in{' '}
+            {Math.round(created.expiresInHours / 24)} days. Only its hash is stored, so it cannot be
+            shown again — create another if it is lost.
+          </div>
+          <p className="mono">{created.url}</p>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(created.url).then(() => setCopied(true))
+              }}
+            >
+              {copied ? 'Copied' : 'Copy link'}
+            </button>
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                setCreated(null)
+                setCopied(false)
+              }}
+            >
+              Invite somebody else
+            </button>
+          </div>
+          <p className="hint">
+            They will appear on the list above as <strong>Invited</strong> until they open it.
+          </p>
+        </>
+      ) : (
+        <>
+          {error && <div className="notice error">{error}</div>}
+          <form onSubmit={invite}>
+            <label>
+              <span className="label-text">Email</span>
+              <input
+                type="email"
+                value={email}
+                placeholder="ada@example.com"
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <p className="hint">
+                Theirs to sign in with, and never published to the relay. They cannot change it when
+                enrolling — a link that let you pick would be transferable to anyone.
+              </p>
+            </label>
+            <label>
+              <span className="label-text">Name</span>
+              <input
+                type="text"
+                value={displayName}
+                placeholder="Ada Lovelace"
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+            </label>
+            <label>
+              <span className="label-text">Handle</span>
+              <input
+                type="text"
+                value={handle}
+                placeholder="ada"
+                onChange={(event) => setHandle(event.target.value)}
+              />
+              <p className="hint">
+                Optional. Reserved now and published when they enrol; they can set it themselves
+                later instead.
+              </p>
+            </label>
+            <label>
+              <span className="label-text">Role</span>
+              <select
+                value={role}
+                onChange={(event) => setRole(event.target.value as 'admin' | 'member')}
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+              <p className="hint">
+                An admin can see this screen, offboard people and invite others.
+              </p>
+            </label>
+            <div className="row">
+              <button type="submit" disabled={busy || email.trim() === ''}>
+                {busy ? 'Creating…' : 'Create an invite link'}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </section>
   )
 }
 

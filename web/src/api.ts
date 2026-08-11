@@ -197,6 +197,34 @@ export type AdmitResult =
 export const admitToRelay = (id: string) =>
   request<AdmitResult>(`/admin/people/${encodeURIComponent(id)}/admit`, { method: 'POST' })
 
+// --- Adding a person (PEEK-65) ----------------------------------------------
+
+/**
+ * The invite an admin just created.
+ *
+ * `url` appears **once**. Only the token's hash is stored, so a lost link is
+ * reissued rather than looked up — which is the same shape as a service
+ * credential, and for the same reason: it is a bearer credential that will sit
+ * in somebody's chat history.
+ */
+export interface CreatedInvite {
+  id: string
+  email: string
+  displayName: string | null
+  handle: string | null
+  role: 'admin' | 'member'
+  expiresAt: string
+  url: string
+  expiresInHours: number
+}
+
+export const createInvite = (input: {
+  email: string
+  displayName?: string
+  handle?: string
+  role?: 'admin' | 'member'
+}) => request<CreatedInvite>('/invites', { method: 'POST', body: JSON.stringify(input) })
+
 // --- Role identities (PEEK-34) ----------------------------------------------
 
 // `role-identities`, not `roles`: API routes mount before the UI catch-all, so

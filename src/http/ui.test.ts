@@ -10,6 +10,7 @@
  * They require `pnpm build:web` to have run — CI does it before `pnpm test`
  * for exactly this reason, since the mount is conditional on a build existing.
  */
+import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
 import { uiIsBuilt } from './ui.js'
@@ -88,5 +89,89 @@ describe.runIf(uiIsBuilt())('the account UI', () => {
   it('does not let a stale shell be cached for the next person', async () => {
     const response = await app.request('/', { headers: { accept: 'text/html' } })
     expect(response.headers.get('cache-control')).toBe('no-store')
+  })
+})
+
+/**
+ * Every admin write must be reachable from the console (PEEK-65).
+ *
+ * `POST /invites` existed, was admin-guarded, and was covered by seven route
+ * tests — and **nothing in `web/` ever called it**. So the single action the
+ * admin console exists for, adding a colleague, could only be performed with
+ * curl or over SSH. The people list showed pending invites while offering no
+ * way to create one.
+ *
+ * No server test could have caught that, because the server was correct. Every
+ * route test reached for the `createInvite` *domain function* or posted the
+ * path directly, which is precisely the blind spot: both prove the endpoint
+ * works and neither proves anybody can get to it.
+ *
+ * So this checks the seam between the two halves rather than either half. It is
+ * deliberately structural — matching path literals, not behaviour — because the
+ * failure it guards against is an endpoint with no caller, and that is visible
+ * in the text.
+ */
+describe('the console can reach every admin write', () => {
+  // Read from disk rather than listed, so a new route file is covered the day
+  // it lands instead of the day somebody remembers to add it here.
+  const routesDir = new URL('routes/', import.meta.url)
+  const routeSources = readdirSync(routesDir).filter(
+    (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
+  )
+
+  /** Admin-guarded mutations, read out of the route files rather than listed. */
+  function adminWrites(source: string): { path: string; method: string }[] {
+    const found: { path: string; method: string }[] = []
+    // `routes.post('/path', ...adminOnly, …)` — the guard has to be on the same
+    // line as the path, which is how every route in this service is written.
+    const pattern = /routes\.(post|put|delete)\(\s*'([^']+)'\s*,\s*\.\.\.adminOnly/g
+    let match = pattern.exec(source)
+    while (match !== null) {
+      found.push({ method: (match[1] as string).toUpperCase(), path: match[2] as string })
+      match = pattern.exec(source)
+    }
+    return found
+  }
+
+  const client = readFileSync(new URL('../../web/src/api.ts', import.meta.url), 'utf8')
+
+  const writes = routeSources.flatMap((file) =>
+    adminWrites(readFileSync(new URL(file, routesDir), 'utf8')).map(
+      (write) => [file, write.path, write.method] as const,
+    ),
+  )
+
+  // A guard that silently matched nothing would pass forever.
+  it('found the admin writes to check', () => {
+    expect(writes.length).toBeGreaterThan(3)
+  })
+
+  it.each(writes)('%s exposes %s (%s) to the client', (_file, path, method) => {
+    /*
+      Matched on path *and* method together, which the first version of this
+      test got wrong: `/invites` also appears in the client's `getInvite`, so a
+      bare substring check passed while the POST had no caller at all — the very
+      bug being guarded against, surviving its own guard.
+
+      The last static segment is the distinguishing one (`/offboard`,
+      `/reinstate`, `/invites`), and the client writes its method within a few
+      lines of the path, so a window after the match is enough without parsing
+      TypeScript. Compared by literal segments because the client builds these
+      as template strings: `/admin/people/${id}/offboard`.
+    */
+    const segments = path.split(/:[a-zA-Z]+/).filter((part) => part !== '' && part !== '/')
+    const distinguishing = segments[segments.length - 1] as string
+
+    const callers: string[] = []
+    for (let at = client.indexOf(distinguishing); at !== -1; ) {
+      callers.push(client.slice(at, at + 220))
+      at = client.indexOf(distinguishing, at + 1)
+    }
+
+    expect(callers.length, `${path} appears nowhere in web/src/api.ts`).toBeGreaterThan(0)
+    expect(
+      callers.some((caller) => caller.includes(`method: '${method}'`)),
+      `${method} ${path} has no caller in web/src/api.ts — the endpoint exists but no screen can reach it`,
+    ).toBe(true)
   })
 })
