@@ -35,7 +35,7 @@ async function auditRows(action: string) {
 
 let ada: Awaited<ReturnType<typeof createUserWithKey>>
 let peekToken: string
-let linearToken: string
+let shipToken: string
 
 beforeAll(async () => {
   await prepareDatabase()
@@ -45,7 +45,7 @@ beforeEach(async () => {
   await truncateAll()
   ada = await createUserWithKey({ email: 'ada@example.test' })
   peekToken = (await issueToken({ pubkey: ada.pubkey, clientId: 'estiva-peek' })).token
-  linearToken = (await issueToken({ pubkey: ada.pubkey, clientId: 'linear-lite' })).token
+  shipToken = (await issueToken({ pubkey: ada.pubkey, clientId: 'estiva-ship' })).token
 })
 
 afterAll(async () => {
@@ -141,12 +141,12 @@ describe('per-app policy (PEEK-71)', () => {
   })
 
   it('applies the calling app’s policy, not the other app’s', async () => {
-    expect((await sign(linearToken, { kind: 30850, tags: [], content: '' })).status).toBe(200)
+    expect((await sign(shipToken, { kind: 30850, tags: [], content: '' })).status).toBe(200)
     expect((await sign(peekToken, { kind: 30850, tags: [], content: '' })).status).toBe(422)
   })
 
   it('refuses kind:0 for every app', async () => {
-    for (const token of [peekToken, linearToken]) {
+    for (const token of [peekToken, shipToken]) {
       const response = await sign(token, { kind: 0, tags: [], content: '{"name":"impostor"}' })
       expect(response.status).toBe(422)
       await expect(response.json()).resolves.toMatchObject({

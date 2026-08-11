@@ -18,7 +18,7 @@ import { createApp } from '../app.js'
 const app = createApp()
 
 const REDIRECT = 'https://ship.test/callback'
-const CLIENT = 'linear-lite'
+const CLIENT = 'estiva-ship'
 
 /** A real PKCE pair: verifier, and base64url(sha256(verifier)). */
 function pkce() {

@@ -127,7 +127,7 @@ describe('token validation by a relying party', () => {
   // lifted out of one app must not pass as another app's.
   it('rejects a token presented to the wrong application', async () => {
     const ada = await createUserWithKey({ email: 'ada@example.test' })
-    const { token } = await issueToken({ pubkey: ada.pubkey, clientId: 'linear-lite' })
+    const { token } = await issueToken({ pubkey: ada.pubkey, clientId: 'estiva-ship' })
 
     await expect(validateAsRelyingParty(token, 'estiva-peek')).rejects.toThrow()
   })
