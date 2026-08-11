@@ -219,13 +219,19 @@ built and are now the only way in (PEEK-65), and the **admin console has its
 first screen**: the people list (PEEK-64).
 
 That list is also where admission stopped being absent and started being
-*observed*. `src/domain/admission.ts` is the read-only port PEEK-36 specified,
-and it answers `unknown` for everybody, because the relay exposes no way to read
-membership and the only alternative would be reaching into Buzz's database.
-Displaying that honestly is the point: this service's view of a person and the
-relay's view now sit on one row, so a half-offboarded person — gone here, still
-admitted there — is visible rather than silent. Driving admission, rather than
-watching it, remains PEEK-66's job.
+*observed*, and then — on 2026-08-11 — *driven*. `src/domain/admission.ts` is the
+port PEEK-36 specified, and it answered `unknown` for everybody while the relay
+exposed no way to read membership. Buzz now serves `GET /api/members`, so this
+service's view of a person and the relay's view sit on one row with both actually
+measured, and a half-offboarded person is visible rather than inferred.
+
+Driving it needed no new endpoint at all: the relay has accepted membership
+changes as signed `kind:9030`/`9031` events through the existing bridge all
+along. So enrolment admits a new pubkey and offboarding revokes it, while Buzz
+keeps authorising every one of those events (PEEK-94, PEEK-65). `unknown`
+survives, because a relay that cannot be reached still produces it — and it now
+carries **which** of four causes it was, after a single grey chip let an
+offboarded operator disable admission unnoticed (PEEK-102).
 
 Two entries left this list on 2026-08-07 (PEEK-31):
 
@@ -242,9 +248,16 @@ publishing the profile the handle rides in.
 
 **Offboarding is one action** (PEEK-66): revoke every passkey, disable the
 account and kill its sessions, withdraw the handle by republishing a `kind:0`
-without it. Three of the four steps — the fourth, revoking admission at the
-relay, is Buzz's, and the console shows the command rather than reporting a
-success that is not true. The runbook is [OFFBOARDING.md](OFFBOARDING.md).
+without it, and revoke admission at the relay. That fourth step was a command
+printed for a human until PEEK-94; when it still cannot happen, the console says
+why and hands the command back rather than reporting a success that is not true.
+
+It has a counterpart now — **reinstatement** (PEEK-102), which restores the
+account *and* re-admits the pubkey, because a status change alone leaves somebody
+active here and locked out there. Offboarding the relay operator is refused
+outright: it would revoke its own admission and disable the capability for the
+whole workspace, which is not a hypothetical. The runbook, including that
+incident, is [OFFBOARDING.md](OFFBOARDING.md).
 
 Worth stating plainly because it is what makes Stage 4 viable: **custody adds
 nothing to offboarding.** It works identically whether or not this service holds

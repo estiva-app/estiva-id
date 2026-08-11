@@ -249,6 +249,14 @@ refuse — and it would be the first thing to unpick when workspaces get dedicat
 deployments. Observing admission properly therefore needs *Buzz* to grow a read
 endpoint. Until it does, the honest display is the whole of the mitigation.
 
+> **Superseded on 2026-08-11 — the two paragraphs above describe the relay as it
+> was on 2026-08-10, and are kept because the reasoning still holds for the state
+> they describe.** Buzz grew exactly the endpoint they call for
+> (`GET /api/members`, PEEK-94), so `unknown` stopped being the only reachable
+> answer. The conclusion that mattered was right and is unchanged: the way to
+> answer this was for Buzz to expose a read, never for this service to open
+> another system's database. See the amendment below.
+
 A third enrolment dimension came out of building this and is worth recording,
 because it is a state neither system named before: **`enrolling`** — the invite
 was opened, a user row and a custodied key exist, and the passkey prompt was
@@ -258,6 +266,59 @@ list as "Never signed in".
 
 `users.status` (`active` / `suspended` / `offboarded`) describes only *this
 service's* view and deliberately does not claim to represent relay admission.
+
+### Amended 2026-08-11: it drives admission now, both ways (PEEK-94, PEEK-65)
+
+The decision above — *observe, do not drive* — was made when Buzz exposed no way
+to read membership and no way to change it that was not a CLI against its own
+Postgres. Both halves turned out to be answerable without the coupling this
+section exists to refuse:
+
+* **Reading** is `GET /api/members`, which Buzz grew for PEEK-94.
+* **Writing** never needed a new endpoint. The relay has accepted membership
+  changes as signed `kind:9030`/`9031` events all along, through the same
+  `POST /events` bridge this service already published `kind:0` to.
+
+So enrolment admits the new pubkey and offboarding revokes it, and **Buzz still
+owns the decision** — it authorises every one of those events as `relay_admin.rs`
+always did. What changed is that the decision can be *asked for* rather than
+printed as a command and hoped for. The staged route described above ended where
+it said it would: filling in a method, not redesigning a surface.
+
+**`unknown` remains, and remains first-class.** A relay that cannot be reached
+still produces it. What it no longer does is hide *why* — see the reason table in
+[API.md](API.md#the-admin-directory), which exists because a single grey chip
+covered four distinct causes and let the next entry go unnoticed.
+
+### Learned by doing it: the operator identity is a single point of failure (PEEK-102)
+
+Driving admission means holding a key that the relay accepts as an admin, and
+that key belongs to a role identity like any other — which meant it appeared in
+the people list like any other, and could be offboarded like any other.
+
+It was, during PEEK-94 QA on production, by a cleanup script that offboarded the
+disposable identities. Offboarding revoked its admission, so **the feature
+disabled itself**: every admission read degraded to `unknown`, the people list
+went grey, and offboarding went back to printing a command for a human. Nothing
+said any of it, because a grey column is also what "no operator configured" and
+"relay unreachable" look like.
+
+Three things came out of it, all now closed:
+
+* **Offboarding the operator is refused**, as self-offboarding is, and for the
+  same reason one scope up: both remove a route back in that the console cannot
+  restore. The refusal names `RELAY_OPERATOR_USER_ID`, because repointing it is
+  genuinely the way to retire that identity.
+* **Reinstatement exists** — and restores admission, not only status. A status
+  flip alone leaves the pubkey out of `relay_members`, which is why the original
+  recovery needed SQL *and* a `buzz-admin` invocation.
+* **`unknown` says which of the four causes it is.** Every one was already
+  computed in `nostr/members.ts` and discarded one layer up.
+
+The general lesson is not about this identity. **A capability that authenticates
+as a member of the thing it manages can revoke its own access**, and the failure
+is silent by construction — the surface that would report it is the one that
+just stopped working.
 
 ### Known and accepted: offboarding is not instant everywhere
 
@@ -273,14 +334,21 @@ value, not a rewrite. Recorded so it is a decision rather than a surprise.
 
 ## Still open
 
-* **Recovery.** No account-recovery path. Enrolling a second passkey requires an
-  existing session, which you cannot get on a new device if you lost the only
-  one. Cross-device enrolment normally happens client-side via WebAuthn hybrid
-  transport (the QR flow), so the server seam is right — but "I lost my laptop"
-  has no server-side answer in Stage 1. Revoking your last passkey is refused
-  for this reason.
-* **Registration is open.** Anyone who can reach the origin can create an
-  account. Invite-gated enrolment is PEEK-65.
+* **Recovery is admin-assisted, and that is the whole of it.** PEEK-67 answered
+  "I lost my laptop": an admin issues a single-use link, the person enrols a new
+  passkey and **keeps the same key**, so nothing they signed detaches from them.
+  This is the one place custody pays for itself — in consumer Nostr the same
+  event is simply unrecoverable.
+
+  What is still open is the case with *no admin to ask*: a one-admin workspace
+  where that admin loses their only device has no path back except shell access.
+  Revoking your last passkey is refused for the same reason. Reinstatement
+  (PEEK-102) does not help here — it restores an offboarded account, not a lost
+  authenticator.
+* ~~**Registration is open.**~~ — closed by PEEK-65. Enrolment needs an invite,
+  the first of which is minted over SSH; see [API.md](API.md#bootstrapping) for
+  why a bootstrap token would have been the same secret with an extra copy to
+  leak.
 * **KEK rotation** is expressible in the envelope format but has no procedure —
   see [KEY-CUSTODY.md](KEY-CUSTODY.md).
 * **Audit retention.** The log is read now — `GET /admin/audit` and the History

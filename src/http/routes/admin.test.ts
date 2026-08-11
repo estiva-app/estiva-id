@@ -159,6 +159,7 @@ describe('the states that are otherwise invisible', () => {
       getAdmissionStatus: async (): Promise<AdmissionStatus> => 'admitted',
       getAdmissionStatuses: async (pubkeys) =>
         new Map(pubkeys.map((key) => [key, 'admitted' as AdmissionStatus])),
+      lastUnknownReason: () => null,
     })
 
     const entry = byEmail((await people(cookie)).people, 'leaver@example.test')

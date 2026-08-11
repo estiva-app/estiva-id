@@ -87,9 +87,28 @@ Requiring shell access is the point. "First registration becomes admin" is a
 race on a public origin, and a bootstrap token in the environment is the same
 secret as SSH with an extra copy to leak.
 
-**An identity is not relay access.** The relay runs closed, so a newly enrolled
-person cannot publish their profile until an operator admits their pubkey —
-Buzz owns admission and Estiva ID only observes it (PEEK-36).
+### Enrolment admits the pubkey
+
+Onboarding is two operations against two systems: create the identity here, and
+admit the pubkey to the Buzz community. Until PEEK-94 this service could only do
+the first, so a colleague could open their link, enrol a passkey, sign in — and
+read nothing in either app, because the relay runs closed and had never heard of
+their key. "Add a person" was three-quarters of an action.
+
+Finishing enrolment now publishes a `kind:9030` for the new pubkey, then the
+reserved handle's `kind:0`. **That order is the contract**: a profile from a
+pubkey the relay does not yet admit is dropped, which used to leave the handle
+stored locally and resolving nowhere, waiting on an account-page save nobody
+knew to make.
+
+**A failure here does not fail enrolment.** The person already has a working
+passkey and a session, and refusing would strand an account they can already
+authenticate to. It is recorded as a `relay.admit` audit entry with
+`outcome: error`, the row shows "Not admitted", and an admin completes it with
+`POST /admin/people/:id/admit`.
+
+Buzz still *owns* admission (PEEK-36). What changed is that the decision can be
+asked for rather than printed as a command and hoped for.
 
 ## Profile
 
@@ -186,17 +205,24 @@ a feature that could not work. This is checked in a browser across two origins.
 
 ## The admin directory
 
-Admin only, and read-only (PEEK-64). Nothing here writes; the mutations an admin
-will want are their own tickets (PEEK-66 offboarding, PEEK-34 role identities),
-and shipping them alongside the screen that first makes the state legible would
-mean shipping them before anyone had looked at what the state is.
+Admin only, and read-first (PEEK-64). The list, the person and the audit trail
+were built before any write, so the screen that makes the state legible shipped
+before anything that changes it.
+
+The writes arrived as their own tickets, and each earned its place by being an
+action whose absence sent somebody to a shell: offboarding (PEEK-66), role
+identities (PEEK-34), and — after offboarding the relay operator on production
+turned a mis-click into a hand-written `UPDATE` — reinstatement and by-hand
+admission (PEEK-102, PEEK-65).
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
 | `GET` | `/admin/people` | Session, **admin** | Everyone with an account, plus invites nobody has opened. |
 | `GET` | `/admin/people/:id` | Session, **admin** | One person plus their passkey summaries. `404` for an unknown id **and** for an invite id. |
 | `GET` | `/admin/audit` | Session, **admin** | The audit trail. `?person=`, `?action=`, `?before=`, `?limit=`. |
-| `POST` | `/admin/people/:id/offboard` | Session, **admin** | Offboard in one action. `409` if already offboarded; `400` on yourself. |
+| `POST` | `/admin/people/:id/offboard` | Session, **admin** | Offboard in one action. `409` if already offboarded; `400` on yourself, and `400` on the relay operator. |
+| `POST` | `/admin/people/:id/reinstate` | Session, **admin** | Undo an offboarding. `409` unless they are `offboarded`. |
+| `POST` | `/admin/people/:id/admit` | Session, **admin** | Admit a pubkey the relay does not have. `400` unless they are `active` and hold a key. |
 
 A stranger gets `401`, not `403` — a `403` would confirm the route exists to
 somebody with no session. Status is checked before role, so an admin who has been
@@ -217,15 +243,39 @@ disagree:
 custodied key exist, and the passkey prompt was dismissed. They own a pubkey and
 cannot sign in, and nothing else in either system says so.
 
-**`admission` is `unknown` today, always, and that is not a stub.** Buzz owns
-admission and exposes no way to read it — the relay's HTTP surface has the
-bridge, media, NIP-05 and a moderation API, and `buzz-admin list-members` is a
-CLI against Buzz's own Postgres. Answering it would mean this service connecting
-to another service's database, which is the coupling the suite exists to argue
-against. So it is displayed as "not known" and never inferred as "probably
-fine" — the one reading that would make a half-offboarded person look admitted.
-The port is `src/domain/admission.ts`; a real implementation is a second class,
-not a new seam.
+**`admission` was `unknown` for everybody until PEEK-94**, because Buzz exposed
+no way to read membership and answering would have meant connecting to another
+service's Postgres. Buzz now serves `GET /api/members`, so the other two values
+are reachable — the roster is read once per page and indexed locally rather than
+asked per pubkey.
+
+**`unknown` did not go away, and must not.** It still means "nobody measured
+this", never "probably fine" — the one reading that would make a half-offboarded
+person look admitted. `GET /admin/people` therefore also returns
+`admissionUnknownReason`, which names *why* nobody could answer:
+
+| Reason | What it means | What fixes it |
+| --- | --- | --- |
+| `operator-not-configured` | No `RELAY_OPERATOR_USER_ID` | Point it at a role identity, admitted at the relay as an admin |
+| `relay-not-configured` | No `RELAY_BRIDGE_URL` | Set it to the workspace relay |
+| `operator-inactive` | The operator identity is not `active` here | Reinstate it — which also puts its own admission back |
+| `forbidden` | The relay does not accept it as owner/admin | `buzz-admin add-member --role admin` for its pubkey |
+| `unreachable` | The relay did not answer | Usually clears itself; until it does, every `admission` is stale |
+
+The two `*-not-configured` values are deliberately separate. Collapsed into one
+they had the console recommend setting a variable that was already set — the same
+one-label-many-causes failure this field exists to end, one level down.
+
+That field exists because all four rendered as one grey chip, and a workspace
+whose operator had been offboarded looked identical to one that never had an
+operator at all (PEEK-102). It is workspace-wide, so it is returned once beside
+the list rather than on each row — per-row would imply it was measured per
+person. The same field comes back from `GET /admin/people/:id`.
+
+The port is `src/domain/admission.ts`, and it is still a port: `RelayAdmission`
+asks the relay, `UnobservableAdmission` is what a deployment with no operator
+gets, and which one is live is a config question rather than a seam through the
+callers.
 
 An unopened invite appears on the list and is deliberately **not** addressable at
 `/admin/people/:id`: there is no account to open, and everything known about it
@@ -325,14 +375,22 @@ republishing a `kind:0` without it.
 ```json
 { "passkeysRevoked": 1, "sessionsRevoked": 2, "handleRevoked": "leaver",
   "attestationPublished": true,
-  "relayAdmission": { "revoked": false, "reason": "buzz_owns_admission",
-                      "command": "docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey …" } }
+  "relayAdmission": { "revoked": true } }
 ```
 
-**`relayAdmission.revoked` is always `false`, and that is not a bug.** Buzz owns
-community admission and exposes no way to drive it, so this does three of the
-four steps and hands back the command an operator still has to run. Reporting
-success would convert a known manual step into an unknown one.
+**All four steps happen now (PEEK-94).** The fourth used to be undeliverable and
+came back as `revoked: false` plus the command a human still had to run. Buzz
+accepts membership changes as signed `kind:9031` events through the same bridge
+this service already publishes `kind:0` to, so it is driven rather than printed.
+
+`revoked: false` is still reachable — no operator identity, an unreachable relay,
+an operator that is not an admin there — and then `reason` and `command` come
+back so the step stays completable by hand:
+
+```json
+{ "relayAdmission": { "revoked": false, "reason": "the relay operator identity is not active",
+                      "command": "docker exec buzz-prod-relay-1 buzz-admin remove-member --pubkey …" } }
+```
 
 `attestationPublished: false` means the withdrawal did not reach the relay, so
 **the handle still resolves** for anyone reading the old event. The local
@@ -343,10 +401,61 @@ The key is deliberately **left active** — revoking it would make everything th
 person ever signed unattributable, and `/sign` refuses on `users.status` anyway
 (PEEK-88).
 
-An admin cannot offboard themselves: there is no recovery flow (PEEK-67), so it
-is a mistake nobody undoes without shell access.
+Two identities are refused, both with `400` and a `detail.reason`:
+
+* **Yourself** (`self_offboard`) — there is no recovery flow (PEEK-67), so it is
+  a mistake nobody undoes without shell access.
+* **The relay operator** (`operator_identity`) — offboarding it revokes *its own*
+  admission, which disables reading and changing admission for the entire
+  workspace. This happened on production during PEEK-94 QA, and nothing said so:
+  the console afterwards was indistinguishable from a healthy one. Point
+  `RELAY_OPERATOR_USER_ID` at another identity first.
 
 Full runbook, including the relay half: [OFFBOARDING.md](OFFBOARDING.md).
+
+### `POST /admin/people/:id/reinstate`
+
+The reverse of offboarding, and it exists because the reverse used to be
+`update users set status='active'` against production (PEEK-102).
+
+```json
+{ "userId": "…", "pubkey": "…", "needsRecovery": true,
+  "relayAdmission": { "admitted": true } }
+```
+
+It restores **two** things: account status here, and admission at the relay. The
+second is not optional — a status flip alone leaves the pubkey absent from
+`relay_members`, so every roster read still `403`s and the reinstatement looks
+like it worked. `admitted: false` carries a `reason` and a `command`, exactly as
+offboarding does.
+
+It deliberately restores **neither passkeys nor the handle**:
+
+* **Passkeys** stay revoked because the devices holding them left with the
+  person. `needsRecovery: true` says a recovery link is the next step — and it is
+  `false` only for a role identity, which never had a passkey and signs with a
+  client credential offboarding never touched.
+* **The handle** may have been taken since it was withdrawn. The person sets it
+  again from their account page, which republishes properly.
+
+This is a separate action rather than a relaxation of `createRecovery`'s guard.
+That guard refuses a non-active identity so a recovery link can never be a way
+back in *around* offboarding, and it stays.
+
+### `POST /admin/people/:id/admit`
+
+The repair path for onboarding (PEEK-65). Enrolment admits the pubkey itself, so
+this covers the case where the relay was unreachable at that moment — leaving
+somebody `active` here, able to sign in, and able to read nothing in either app.
+
+```json
+{ "admitted": true, "alreadyAdmitted": false }
+```
+
+Idempotent: the relay treats an add of an existing member as already-in-state and
+so does this. Refused with `400` for an identity that is not `active`
+(`not_active`) — admitting somebody this service has disabled would re-open the
+half offboarding closed — or that holds no key (`no_key`).
 
 ## Tokens and discovery
 

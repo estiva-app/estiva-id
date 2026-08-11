@@ -35,7 +35,8 @@
  */
 import { config } from '../config.js'
 import { query, queryOne } from '../db/pool.js'
-import { type AdmissionStatus, admissionPort } from './admission.js'
+import { type AdmissionStatus, type AdmissionUnknownReason, admissionPort } from './admission.js'
+import { isOperatorIdentity } from './operator-key.js'
 import type { User } from './users.js'
 
 /**
@@ -88,9 +89,29 @@ export interface DirectoryEntry {
   createdAt: string
   /** Observed from the relay, and `unknown` until Buzz can be asked. */
   admission: AdmissionStatus
+  /**
+   * Whether this is the identity the workspace drives admission through
+   * (PEEK-102).
+   *
+   * Marked because it is not just another service identity: offboarding it
+   * disables admission for everybody, and the row gave no hint of that until
+   * somebody did it. Offboarding it is refused now, but the refusal is a
+   * surprise unless the row says why first.
+   */
+  isOperator: boolean
   /** Invites only. A link nobody used is worth chasing before it dies. */
   expiresAt: string | null
 }
+
+/**
+ * Why admission could not be read at all, or `null` when it could (PEEK-102).
+ *
+ * Returned once beside the list rather than per row, because every cause is
+ * workspace-wide. Three of them — a disabled operator, an operator that is not
+ * an admin at the relay, an unreachable relay — used to look identical to each
+ * other and to the fourth, which is the honest "nothing is configured" state.
+ */
+export type { AdmissionUnknownReason } from './admission.js'
 
 /**
  * The enrolment state for one account row.
@@ -126,7 +147,11 @@ interface PersonRow {
  * only a shape, and a union would need half its columns cast to null on each
  * side — which reads as if the two halves were the same kind of thing.
  */
-export async function listDirectory(): Promise<DirectoryEntry[]> {
+export async function listDirectory(): Promise<{
+  entries: DirectoryEntry[]
+  /** Workspace-wide, and null when admission was read successfully. */
+  admissionUnknownReason: AdmissionUnknownReason | null
+}> {
   const communityHost = config().COMMUNITY_HOST
 
   const people = await query<PersonRow>(
@@ -196,6 +221,7 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     admission: (row.pubkey ? admission.get(row.pubkey) : undefined) ?? 'unknown',
+    isOperator: isOperatorIdentity(row.id),
     expiresAt: null,
   }))
 
@@ -217,11 +243,13 @@ export async function listDirectory(): Promise<DirectoryEntry[]> {
       lastSeenAt: null,
       createdAt: invite.created_at.toISOString(),
       admission: 'unknown',
+      // An invite is not an account, so it cannot be the operator.
+      isOperator: false,
       expiresAt: invite.expires_at.toISOString(),
     })
   }
 
-  return entries
+  return { entries, admissionUnknownReason: admissionPort().lastUnknownReason() }
 }
 
 /**
@@ -349,6 +377,7 @@ export async function getDirectoryEntry(userId: string): Promise<DirectoryEntry 
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     admission: row.pubkey ? await admissionPort().getAdmissionStatus(row.pubkey) : 'unknown',
+    isOperator: isOperatorIdentity(row.id),
     expiresAt: null,
   }
 }

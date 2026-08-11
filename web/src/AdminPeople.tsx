@@ -24,17 +24,22 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { AuditLog } from './AuditLog'
 import {
   type AdmissionStatus,
+  type AdmissionUnknownReason,
+  type AdmitResult,
   ApiError,
   type Credential,
   type Enrolment,
   type OffboardResult,
   type Person,
+  type ReinstateResult,
+  admitToRelay,
   createRoleIdentity,
   getPerson,
   issueRecovery,
   issueServiceCredential,
   listPeople,
   offboardPerson,
+  reinstatePerson,
 } from './api'
 
 const formatDate = (iso: string) =>
@@ -84,10 +89,48 @@ const ADMISSION: Record<AdmissionStatus, { label: string; tone: string }> = {
   unknown: { label: 'Not known', tone: 'muted' },
 }
 
+/**
+ * Why nobody could answer (PEEK-102).
+ *
+ * All four used to render as the same grey chip, which is how offboarding the
+ * relay operator hid in plain sight: the console looked exactly as it had the
+ * day before, and identical to a workspace with no operator at all.
+ *
+ * Each one names what to do, because three of the four are fixable from here or
+ * from a config file and only the last is genuinely "wait".
+ */
+const UNKNOWN_REASON: Record<AdmissionUnknownReason, { summary: string; fix: string }> = {
+  'operator-not-configured': {
+    summary: 'No operator identity is configured, so admission cannot be read or changed.',
+    fix: 'Set RELAY_OPERATOR_USER_ID to a role identity, and admit its pubkey at the relay as an admin.',
+  },
+  /*
+    Split from the one above, because they are different faults with different
+    fixes — and a single label sent an admin to set a variable that was already
+    set. Which is the same mistake this whole table exists to stop making.
+  */
+  'relay-not-configured': {
+    summary: 'No relay is configured, so there is nothing to ask about admission.',
+    fix: 'Set RELAY_BRIDGE_URL to the workspace relay.',
+  },
+  'operator-inactive': {
+    summary: 'The operator identity is not active here, so this service cannot ask the relay.',
+    fix: 'Reinstate it from its own page. Offboarding it also withdrew its admission, which reinstating puts back.',
+  },
+  forbidden: {
+    summary: 'The relay does not accept the operator identity as an owner or admin.',
+    fix: 'Run buzz-admin add-member --role admin for the operator pubkey on the relay.',
+  },
+  unreachable: {
+    summary: 'The relay could not be reached, so nothing here reflects its current state.',
+    fix: 'This usually clears on its own. Until it does, every admission below is stale.',
+  },
+}
+
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; people: Person[] }
+  | { kind: 'ready'; people: Person[]; unknownReason: AdmissionUnknownReason | null }
 
 export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
   const [state, setState] = useState<State>({ kind: 'loading' })
@@ -95,7 +138,9 @@ export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
 
   useEffect(() => {
     listPeople()
-      .then((people) => setState({ kind: 'ready', people }))
+      .then(({ people, admissionUnknownReason }) =>
+        setState({ kind: 'ready', people, unknownReason: admissionUnknownReason }),
+      )
       .catch((error: unknown) =>
         setState({
           kind: 'error',
@@ -136,6 +181,23 @@ export function AdminPeople({ onOpen }: { onOpen: (id: string) => void }) {
         {state.people.length} in total
         {needAttention > 0 ? `, ${needAttention} not fully set up` : ''}.
       </p>
+
+      {/*
+        Said once, above the list, when the whole relay column is guesswork
+        (PEEK-102). Not repeated per row: the cause is workspace-wide, and N
+        copies of one fact would imply it was measured N times.
+
+        It is a warning rather than a note because every "Relay:" chip below is
+        meaningless while it shows — including on anybody offboarded, which is
+        the case where believing the column is actively dangerous.
+      */}
+      {state.unknownReason && (
+        <div className="notice warn">
+          <strong>Relay admission cannot be read.</strong>{' '}
+          {UNKNOWN_REASON[state.unknownReason].summary} Every “Relay” state below is unverified
+          until this is fixed. {UNKNOWN_REASON[state.unknownReason].fix}
+        </div>
+      )}
 
       <label>
         <span className="label-text">Search</span>
@@ -256,6 +318,19 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: (id: string) =>
           {person.role === 'admin' && <span className="badge role">Admin</span>}
           {/* Said once, plainly. A bot among people is the fact worth seeing. */}
           {person.kind === 'role' && <span className="badge role">Service</span>}
+          {/*
+            Not just another service identity (PEEK-102). Everything admission
+            does for the whole workspace runs through this one row, and the row
+            said nothing about that until somebody offboarded it and found out.
+          */}
+          {person.isOperator && (
+            <span
+              className="badge role"
+              title="Relay admission for this whole workspace is driven through this identity. It cannot be offboarded."
+            >
+              Relay operator
+            </span>
+          )}
         </div>
         <div className="cred-meta">{meta.join(' · ')}</div>
       </div>
@@ -297,15 +372,20 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: (id: string) =>
 type DetailState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; person: Person; credentials: Credential[] }
+  | {
+      kind: 'ready'
+      person: Person
+      credentials: Credential[]
+      unknownReason: AdmissionUnknownReason | null
+    }
 
 export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) {
   const [state, setState] = useState<DetailState>({ kind: 'loading' })
 
   const load = useCallback(async () => {
     try {
-      const { person, credentials } = await getPerson(id)
-      setState({ kind: 'ready', person, credentials })
+      const { person, credentials, admissionUnknownReason } = await getPerson(id)
+      setState({ kind: 'ready', person, credentials, unknownReason: admissionUnknownReason })
     } catch (error) {
       setState({
         kind: 'error',
@@ -333,7 +413,7 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
     )
   }
 
-  const { person, credentials } = state
+  const { person, credentials, unknownReason } = state
   const enrolment = ENROLMENT[person.enrolment]
   const admission = ADMISSION[person.admission]
 
@@ -347,7 +427,22 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         <div className="card-head">
           <h2>{person.displayName ?? person.email ?? 'Unnamed'}</h2>
           {person.role === 'admin' && <span className="badge role">Admin</span>}
+          {person.isOperator && <span className="badge role">Relay operator</span>}
         </div>
+
+        {/*
+          Stated before the facts below, because it changes how to read them:
+          this identity's own admission is what every other row's admission is
+          measured with (PEEK-102).
+        */}
+        {person.isOperator && (
+          <div className="notice">
+            <strong>This workspace reads and changes relay admission through this identity.</strong>{' '}
+            Offboarding it is refused — it would revoke its own admission and leave nobody able to
+            see or change anyone else's. To retire it, point <code>RELAY_OPERATOR_USER_ID</code> at
+            another identity first.
+          </div>
+        )}
 
         <dl className="facts">
           <dt>Email</dt>
@@ -371,10 +466,24 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
           <dt>Relay</dt>
           <dd>
             {admission.label}
+            {/*
+              This used to say Buzz exposed no way to read admission, which
+              stopped being true at PEEK-94 — and left the one screen that
+              explains `unknown` explaining it with the wrong reason. There are
+              four now, and which one it is decides what to do about it.
+            */}
             {person.admission === 'unknown' && (
               <div className="cred-meta">
-                Buzz owns admission and exposes no way to read it, so this service cannot check it.
-                Run <code>buzz-admin list-members</code> on the relay to see the truth.
+                {unknownReason ? (
+                  <>
+                    {UNKNOWN_REASON[unknownReason].summary} {UNKNOWN_REASON[unknownReason].fix}
+                  </>
+                ) : (
+                  <>
+                    This identity has no active key to ask about. Run{' '}
+                    <code>buzz-admin list-members</code> on the relay to see the roster directly.
+                  </>
+                )}
               </div>
             )}
           </dd>
@@ -398,8 +507,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
 
         {credentials.length === 0 ? (
           <p className="hint">
-            None. This person cannot sign in, and will need a fresh invite — there is no
-            admin-assisted recovery yet.
+            None. This person cannot sign in. Issue a recovery link below — they enrol a new passkey
+            and keep the same key, so nothing they signed detaches from them.
           </p>
         ) : null}
         {credentials.length > 0 && (
@@ -423,6 +532,20 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
       </section>
 
       <CredentialCard person={person} />
+
+      <AdmitCard
+        person={person}
+        onDone={() => {
+          void load()
+        }}
+      />
+
+      <ReinstateCard
+        person={person}
+        onDone={() => {
+          void load()
+        }}
+      />
 
       <RecoveryCard person={person} />
 
@@ -571,6 +694,193 @@ function CredentialCard({ person }: { person: Person }) {
           </form>
         </>
       )}
+    </section>
+  )
+}
+
+/**
+ * Admitting somebody to the relay by hand (PEEK-65).
+ *
+ * Enrolment does this itself, so the button is the repair path: the relay was
+ * unreachable at the moment somebody finished their passkey, and they are now
+ * active here and able to read nothing in either app. Before this, the people
+ * list could show "Not admitted" and offer nothing to do about it — the fix
+ * lived over SSH, which is exactly the shape of gap that leaves people
+ * half-onboarded for days.
+ *
+ * Shown only when there is something to fix. A button beside an already-admitted
+ * person invites a press that does nothing and teaches an admin the screen is
+ * decorative.
+ */
+function AdmitCard({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<AdmitResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Only for somebody who is active here and demonstrably not admitted there.
+  // `unknown` is deliberately excluded: nobody measured it, so offering a fix
+  // would assert a problem that may not exist.
+  if (person.status !== 'active' || person.admission !== 'not-admitted') return null
+
+  async function admit() {
+    setBusy(true)
+    setError(null)
+    try {
+      const outcome = await admitToRelay(person.id)
+      setResult(outcome)
+      if (outcome.admitted) onDone()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not admit them')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Relay admission</h2>
+      </div>
+
+      <div className="notice warn">
+        <strong>They have an identity here and no access to the relay.</strong> They can sign in,
+        and they cannot read or write in Peek or Ship. This normally happens at enrolment; it did
+        not, or it failed.
+      </div>
+
+      {result?.admitted && (
+        <div className="notice ok">
+          {result.alreadyAdmitted
+            ? 'The relay already had them. Nothing needed changing.'
+            : 'Admitted. They can read and write on the relay now.'}
+        </div>
+      )}
+
+      {result && !result.admitted && (
+        <>
+          <div className="notice error">
+            The relay did not take it ({result.reason}). Until this works, they stay locked out —
+            run it by hand:
+          </div>
+          <div className="row">
+            <code className="command">{result.command}</code>
+          </div>
+        </>
+      )}
+
+      {error && <div className="notice error">{error}</div>}
+
+      {!result?.admitted && (
+        <div className="row">
+          <button type="button" onClick={() => void admit()} disabled={busy}>
+            {busy ? 'Admitting…' : 'Admit to the relay'}
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Putting somebody back (PEEK-102).
+ *
+ * Offboarding shipped without a reverse, on the reasoning that a half-finished
+ * *removal* is the dangerous direction. That was right about the risk and wrong
+ * about the consequence: recovering from a mis-click meant an `update users set
+ * status='active'` against production, which is what actually happened when a
+ * QA cleanup took the relay operator with it.
+ *
+ * **It does not hand passkeys back**, and the card says so rather than letting
+ * an admin walk away thinking the person can sign in. Offboarding revoked them
+ * because the devices were leaving with somebody; a recovery link is the next
+ * step, and it is on this same page.
+ */
+function ReinstateCard({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<ReinstateResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  if (person.status !== 'offboarded') return null
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    try {
+      setResult(await reinstatePerson(person.id))
+      setConfirming(false)
+      onDone()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not reinstate them')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Reinstate</h2>
+      </div>
+
+      {result ? (
+        <>
+          <div className="notice ok">
+            Their account is active again
+            {result.relayAdmission.admitted ? ', and the relay admits them once more' : ''}.
+          </div>
+
+          {/*
+            Said as a warning, not a footnote. "Reinstated" reads as finished,
+            and an admin who stops here has left somebody active with no way to
+            sign in — which looks, from the person's side, exactly like still
+            being offboarded.
+          */}
+          {result.needsRecovery && (
+            <div className="notice warn">
+              <strong>They still cannot sign in.</strong> Offboarding revoked every passkey and this
+              does not give them back — the devices holding them were leaving with the person. Issue
+              a recovery link below so they can enrol a new one, keeping the same key.
+            </div>
+          )}
+
+          {!result.relayAdmission.admitted && (
+            <>
+              <div className="notice error">
+                The relay did not take them back ({result.relayAdmission.reason}), so they are
+                active here and still shut out there. Run this:
+              </div>
+              <div className="row">
+                <code className="command">{result.relayAdmission.command}</code>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <p className="card-note">
+          Restores their account and their admission to the relay. It does <strong>not</strong>{' '}
+          restore passkeys — they will need a recovery link to enrol a device, and they keep the
+          same key, so nothing they signed detaches from them.
+        </p>
+      )}
+
+      {error && <div className="notice error">{error}</div>}
+
+      {!result &&
+        (confirming ? (
+          <div className="row">
+            <button type="button" onClick={run} disabled={busy}>
+              {busy ? 'Reinstating…' : `Yes, reinstate ${person.displayName ?? person.email}`}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setConfirming(true)}>
+            Reinstate this identity
+          </button>
+        ))}
     </section>
   )
 }
@@ -766,7 +1076,22 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
 
       {error && <div className="notice error">{error}</div>}
 
+      {/*
+        The operator gets an explanation instead of a button (PEEK-102). The
+        server refuses it either way, but a live button that always fails is a
+        worse answer than no button — it tells an admin the action is available
+        and makes them discover otherwise by trying.
+      */}
+      {person.isOperator && (
+        <div className="notice warn">
+          <strong>This identity cannot be offboarded.</strong> Admission for the whole workspace is
+          driven through it, and offboarding would revoke its own — leaving nobody able to see or
+          change anyone else's. Point <code>RELAY_OPERATOR_USER_ID</code> at another identity first.
+        </div>
+      )}
+
       {!gone &&
+        !person.isOperator &&
         (confirming ? (
           <div className="row">
             <button type="button" className="danger" onClick={run} disabled={busy}>

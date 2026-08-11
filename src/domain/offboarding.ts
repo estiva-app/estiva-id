@@ -3,9 +3,9 @@
  *
  * A leaver keeps their keypair. That is inherent — no database write takes a
  * private key back — so offboarding is never "delete the identity". It is
- * withdrawing three things the org *does* control, and a fourth it does not:
+ * withdrawing four things:
  *
- * | Step | Owner | Effect |
+ * | Step | Decided by | Effect |
  * | --- | --- | --- |
  * | Revoke every passkey | here | they cannot authenticate again |
  * | Disable the account, kill sessions | here | `/token` and `/sign` refuse them |
@@ -31,21 +31,31 @@
  * should mean — the org keeps the record. It also does not need revoking:
  * `/sign` refuses on `users.status`, not on the key (PEEK-88).
  *
- * ## The fourth step, and why this returns something awkward
+ * ## The fourth step, and why the result is still shaped for failure
  *
- * **Estiva ID cannot revoke relay admission.** Buzz owns it (PEEK-36) and
- * exposes no HTTP surface for it at all — `buzz-admin` is a CLI against Buzz's
- * own Postgres, and reaching into another service's database is the coupling
- * this suite exists to refuse.
+ * It used to be undeliverable: Buzz owned admission and appeared to expose no
+ * HTTP surface for it, so this did three of four and printed the fourth as a
+ * command for a human. **PEEK-94 closed that** — the relay has always accepted
+ * membership changes as signed `kind:9031` events through the same bridge this
+ * service publishes `kind:0` to, so it is driven rather than described. Buzz
+ * still authorises it; what changed is that the decision can be asked for.
  *
- * So this does three of four and **says so**, rather than returning a cheerful
- * success. The result carries the exact command an operator still has to run.
- * A green tick here, with the relay still admitting them, would be worse than
- * no button at all: it would convert a known manual step into an unknown one.
+ * The awkward shape stays because failure stayed reachable — no operator
+ * identity, an unreachable relay, an operator that is not an admin there. In
+ * those cases the result says so and carries the command, because a green tick
+ * with the relay still admitting them would convert a known manual step into an
+ * unknown one.
+ *
+ * ## One identity this refuses
+ *
+ * The relay operator, whose key signs the step above. Offboarding it revokes its
+ * own admission and disables admission for the whole workspace — see
+ * {@link OperatorIdentity}.
  */
 import { recordAudit } from './audit.js'
 import { revokeAllCredentials } from './credentials.js'
 import { getActivePubkey } from './keys.js'
+import { isOperatorIdentity } from './operator-key.js'
 import { getProfile, publishProfile, saveProfile } from './profile.js'
 import { removeMemberCommand, revokeMember } from './relay-membership.js'
 import { findUserById, setUserStatus } from './users.js'
@@ -100,6 +110,33 @@ export class NoSuchPerson extends Error {
 }
 
 /**
+ * Refusing to offboard the identity that drives admission (PEEK-102).
+ *
+ * This happened. A QA cleanup offboarded the disposable identities and took the
+ * relay operator with them — and offboarding, now that it works, **revoked the
+ * operator's own admission**. The feature disabled itself: every admission read
+ * degraded to `unknown`, the people list went grey, and offboarding went back to
+ * printing a command for a human. Nothing said any of it, because a grey column
+ * is also what "no operator configured" and "relay unreachable" look like.
+ *
+ * So it is refused rather than warned about, for the same reason self-offboarding
+ * is: both take away a route back in that the console itself cannot restore.
+ * Self-offboarding costs one admin their access; this costs the whole workspace
+ * its ability to see or change admission at all.
+ *
+ * The refusal names the config, because the way out is genuinely to point
+ * `RELAY_OPERATOR_USER_ID` somewhere else first — not to try harder here.
+ */
+export class OperatorIdentity extends Error {
+  constructor() {
+    super(
+      'That identity drives relay admission for this workspace. Point RELAY_OPERATOR_USER_ID at another identity before offboarding it.',
+    )
+    this.name = 'OperatorIdentity'
+  }
+}
+
+/**
  * The command an operator has to run **when this service could not**.
  *
  * Built with the pubkey filled in, because the failure this whole ticket exists
@@ -117,6 +154,9 @@ export async function offboardPerson(
   const user = await findUserById(userId)
   if (!user) throw new NoSuchPerson()
   if (user.status === 'offboarded') throw new AlreadyOffboarded()
+  // Checked here rather than in the route, because the subject alone decides it
+  // — so a script or a future caller is refused too, not only the button.
+  if (isOperatorIdentity(userId)) throw new OperatorIdentity()
 
   const pubkey = (await getActivePubkey(userId)) ?? null
   // Read before withdrawing it, so the record can say what was taken away.

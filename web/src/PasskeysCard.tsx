@@ -108,7 +108,7 @@ export function PasskeysCard({ credentials, onChange }: Props) {
       </div>
       <p className="card-note">
         One per device. Keeping a second one is what makes a lost laptop an inconvenience rather
-        than a lockout — there is no admin-assisted recovery yet.
+        than a lockout — otherwise getting back in means asking an admin for a recovery link.
       </p>
 
       {notice && <div className={`notice ${notice.tone}`}>{notice.text}</div>}
