@@ -44,6 +44,20 @@ export function operatorConfigured(): boolean {
 }
 
 /**
+ * Whether this identity is the one the workspace acts through (PEEK-102).
+ *
+ * Worth a named predicate rather than an inline config comparison, because
+ * three separate places have to agree about it: the guard that refuses to
+ * offboard it, the reinstatement that re-admits it, and the row that marks it.
+ * A workspace-wide capability disabled by a mis-click is exactly the failure
+ * that came from nobody asking this question.
+ */
+export function isOperatorIdentity(userId: string): boolean {
+  const operator = config().RELAY_OPERATOR_USER_ID
+  return operator !== '' && operator === userId
+}
+
+/**
  * Run something with the operator's secret key in scope.
  *
  * Same shape as {@link withUserSecretKey} — the key is used and dropped, never

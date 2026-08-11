@@ -87,6 +87,21 @@ export const getMe = () => request<Me>('/me')
  */
 export type AdmissionStatus = 'admitted' | 'not-admitted' | 'unknown'
 
+/**
+ * Why admission could not be read at all (PEEK-102).
+ *
+ * Workspace-wide, so it arrives once beside the list rather than on every row.
+ * Without it a grey chip meant four different things — including "somebody
+ * offboarded the operator and disabled admission for everyone", which is how
+ * that went unnoticed on production.
+ */
+export type AdmissionUnknownReason =
+  | 'relay-not-configured'
+  | 'operator-not-configured'
+  | 'operator-inactive'
+  | 'forbidden'
+  | 'unreachable'
+
 /** How far through setup somebody is. See `src/domain/directory.ts`. */
 export type Enrolment = 'invited' | 'enrolling' | 'enrolled' | 'not-applicable'
 
@@ -106,13 +121,28 @@ export interface Person {
   lastSeenAt: string | null
   createdAt: string
   admission: AdmissionStatus
+  /**
+   * The identity this workspace drives relay admission through (PEEK-102).
+   *
+   * Marked because offboarding it disables admission for everybody — a
+   * workspace-wide capability behind a row that looked like any other service
+   * identity.
+   */
+  isOperator: boolean
   expiresAt: string | null
 }
 
-export const listPeople = () => request<{ people: Person[] }>('/admin/people').then((r) => r.people)
+export const listPeople = () =>
+  request<{ people: Person[]; admissionUnknownReason: AdmissionUnknownReason | null }>(
+    '/admin/people',
+  )
 
 export const getPerson = (id: string) =>
-  request<{ person: Person; credentials: Credential[] }>(`/admin/people/${encodeURIComponent(id)}`)
+  request<{
+    person: Person
+    credentials: Credential[]
+    admissionUnknownReason: AdmissionUnknownReason | null
+  }>(`/admin/people/${encodeURIComponent(id)}`)
 
 export interface OffboardResult {
   userId: string
@@ -135,6 +165,37 @@ export interface OffboardResult {
 
 export const offboardPerson = (id: string) =>
   request<OffboardResult>(`/admin/people/${encodeURIComponent(id)}/offboard`, { method: 'POST' })
+
+/**
+ * Putting somebody back (PEEK-102).
+ *
+ * Restores account status and relay admission. It does **not** give passkeys
+ * back — offboarding revoked them because the devices were leaving with the
+ * person — so `needsRecovery` says whether a recovery link is the next step.
+ */
+export interface ReinstateResult {
+  userId: string
+  pubkey: string | null
+  relayAdmission: { admitted: true } | { admitted: false; reason: string; command: string }
+  needsRecovery: boolean
+}
+
+export const reinstatePerson = (id: string) =>
+  request<ReinstateResult>(`/admin/people/${encodeURIComponent(id)}/reinstate`, { method: 'POST' })
+
+/**
+ * Admit somebody to the relay by hand (PEEK-65).
+ *
+ * The repair path, not the happy one: enrolment admits the pubkey itself, and
+ * this covers the case where the relay was unreachable at that moment. Without
+ * it the people list could say "Not admitted" and offer nothing to do about it.
+ */
+export type AdmitResult =
+  | { admitted: true; alreadyAdmitted: boolean }
+  | { admitted: false; reason: string; command: string }
+
+export const admitToRelay = (id: string) =>
+  request<AdmitResult>(`/admin/people/${encodeURIComponent(id)}/admit`, { method: 'POST' })
 
 // --- Role identities (PEEK-34) ----------------------------------------------
 

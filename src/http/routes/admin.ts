@@ -17,13 +17,25 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { config } from '../../config.js'
+import { admissionPort } from '../../domain/admission.js'
 import { auditActions, effectiveLimit, listAudit } from '../../domain/audit-log.js'
 import { recordAudit } from '../../domain/audit.js'
 import { listCredentialSummaries } from '../../domain/credentials.js'
 import { getDirectoryEntry, listDirectory } from '../../domain/directory.js'
 import { getActivePubkey } from '../../domain/keys.js'
-import { AlreadyOffboarded, NoSuchPerson, offboardPerson } from '../../domain/offboarding.js'
+import {
+  AlreadyOffboarded,
+  NoSuchPerson,
+  OperatorIdentity,
+  offboardPerson,
+} from '../../domain/offboarding.js'
 import { RecoveryRefused, createRecovery } from '../../domain/recovery.js'
+import {
+  NoSuchPerson as NoSuchReinstateTarget,
+  NotOffboarded,
+  reinstatePerson,
+} from '../../domain/reinstate.js'
+import { addMemberCommand, admitMember } from '../../domain/relay-membership.js'
 import { RoleRefused, createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
@@ -57,7 +69,16 @@ export function adminRoutes(): Hono<AppEnv> {
    * one when a directory gets big enough to need it.
    */
   routes.get('/admin/people', ...adminOnly, async (c) => {
-    return c.json({ people: await listDirectory() })
+    const { entries, admissionUnknownReason } = await listDirectory()
+    /*
+      The reason rides beside the list, not on each row (PEEK-102).
+
+      A grey "Relay: Not known" chip had four causes and one appearance, so
+      offboarding the operator — which disabled admission for the whole
+      workspace — produced a console indistinguishable from a healthy one. Every
+      cause is workspace-wide, so this is one field rather than N copies of it.
+    */
+    return c.json({ people: entries, admissionUnknownReason })
   })
 
   /**
@@ -106,6 +127,10 @@ export function adminRoutes(): Hono<AppEnv> {
     return c.json({
       person,
       credentials: await listCredentialSummaries(person.id),
+      // Same field as the list, for the same reason: a person whose admission
+      // reads `unknown` deserves to be told whether that is about them or about
+      // the workspace's ability to ask at all (PEEK-102).
+      admissionUnknownReason: admissionPort().lastUnknownReason(),
     })
   })
 
@@ -137,8 +162,114 @@ export function adminRoutes(): Hono<AppEnv> {
       if (error instanceof AlreadyOffboarded) {
         throw conflict('That identity is already offboarded', { reason: 'already_offboarded' })
       }
+      /*
+        Refused for the same class of reason as self-offboarding, one scope up
+        (PEEK-102). Offboarding the operator revokes its own relay admission and
+        disables admission for the entire workspace — reads degrade to
+        `unknown`, offboarding goes back to printing a command, and nothing says
+        so. It happened on production during PEEK-94 QA.
+
+        `badRequest` rather than `conflict`: nothing about the target's state is
+        in the way. The request is refused on what that identity *is*, and the
+        way to proceed is to repoint the config first.
+      */
+      if (error instanceof OperatorIdentity) {
+        throw badRequest(error.message, { reason: 'operator_identity' })
+      }
       throw error
     }
+  })
+
+  /**
+   * Putting somebody back (PEEK-102).
+   *
+   * The counterpart offboarding never got. PEEK-66 built removal only, on the
+   * reasoning that a half-finished *removal* is the dangerous direction — true,
+   * and it left the reverse needing `update users set status='active'` against
+   * production, which is how an ordinary mis-click became a database edit.
+   *
+   * **Not a relaxation of the recovery guard.** `createRecovery` refuses a
+   * non-active identity so that a recovery link can never be a way back in
+   * around offboarding. That stays. This is a separate, audited decision an
+   * admin makes about an account, which is a different thing from a link
+   * somebody holds.
+   */
+  routes.post('/admin/people/:id/reinstate', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+
+    try {
+      return c.json(
+        await reinstatePerson(c.req.param('id'), {
+          actorUserId,
+          requestId: c.get('requestId'),
+        }),
+      )
+    } catch (error) {
+      if (error instanceof NoSuchReinstateTarget) throw notFound('No such person')
+      if (error instanceof NotOffboarded) {
+        throw conflict('That identity is not offboarded', { reason: 'not_offboarded' })
+      }
+      throw error
+    }
+  })
+
+  /**
+   * Admit somebody to the relay by hand (PEEK-65).
+   *
+   * Enrolment admits the pubkey itself, so this is the repair path rather than
+   * the happy one: the relay was unreachable at the moment somebody finished
+   * their passkey, and they are now `active` here and unable to read a thing in
+   * either app. That state was previously only fixable over SSH, which meant
+   * the people list could show "Not admitted" and offer nothing to do about it.
+   *
+   * Idempotent, because the relay treats an add of an existing member as
+   * already-in-state and so does this — an admin pressing it twice is not an
+   * error worth reporting.
+   */
+  routes.post('/admin/people/:id/admit', ...adminOnly, async (c) => {
+    const target = c.req.param('id')
+    const person = await getDirectoryEntry(target)
+    if (!person) throw notFound('No such person')
+
+    // Admitting somebody this service has already disabled would re-open the
+    // half that offboarding closed, and leave the two systems disagreeing in
+    // the dangerous direction. Reinstate them first, which does both.
+    if (person.status !== 'active') {
+      throw badRequest('Reinstate this identity before admitting it to the relay', {
+        reason: 'not_active',
+      })
+    }
+    if (!person.pubkey) {
+      throw badRequest('That identity has no active key to admit', { reason: 'no_key' })
+    }
+
+    const result = await admitMember(person.pubkey)
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: c.get('session').userId,
+      action: 'relay.admit',
+      // `error` rather than `refused`: nothing declined this, the relay could
+      // not be reached or could not be asked. A refusal would imply a decision.
+      outcome: result.ok ? 'success' : 'error',
+      subjectPubkey: person.pubkey,
+      detail: {
+        subjectUserId: target,
+        alreadyAdmitted: result.alreadyInState === true,
+        ...(result.ok ? {} : { reason: result.reason }),
+      },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json(
+      result.ok
+        ? { admitted: true, alreadyAdmitted: result.alreadyInState === true }
+        : {
+            admitted: false,
+            reason: result.reason ?? 'unknown',
+            command: addMemberCommand(person.pubkey),
+          },
+    )
   })
 
   /**

@@ -16,7 +16,7 @@
  * member.
  */
 import { config } from '../config.js'
-import { withOperatorSecretKey } from '../domain/operator-key.js'
+import { NoOperatorIdentity, withOperatorSecretKey } from '../domain/operator-key.js'
 import { authorizationHeader } from './nip98.js'
 
 export interface MemberRecord {
@@ -26,6 +26,26 @@ export interface MemberRecord {
   createdAt: string
 }
 
+/**
+ * Why a read failed — five causes, kept apart (PEEK-102).
+ *
+ * Most were already distinguished here and then flattened into one grey chip by
+ * the caller, which is how offboarding the operator produced a console identical
+ * to a healthy one. `operator-inactive` in particular used to arrive as
+ * `unreachable`, blaming the relay for a decision made in this service.
+ *
+ * The two `*-not-configured` values are split because they are different
+ * deployment faults with different fixes, and a single label would have the
+ * console recommend setting a variable that is already set — the same
+ * one-label-many-causes mistake one level down.
+ */
+export type MemberFailure =
+  | 'unreachable'
+  | 'forbidden'
+  | 'relay-not-configured'
+  | 'operator-not-configured'
+  | 'operator-inactive'
+
 export type MemberLookup =
   | { ok: true; admitted: boolean; role: string | null }
   /**
@@ -33,7 +53,22 @@ export type MemberLookup =
    * them is the one mistake that makes a half-offboarded person look fine, and
    * it is the reason this port exists at all.
    */
-  | { ok: false; reason: 'unreachable' | 'forbidden' | 'not-configured'; message: string }
+  | { ok: false; reason: MemberFailure; message: string }
+
+/**
+ * A missing or disabled operator is this service's own state, not the relay's.
+ *
+ * Without this the `catch` below reported `unreachable` for it — sending
+ * somebody to check whether Buzz was up when the actual answer was that an
+ * identity here had been offboarded.
+ */
+function operatorFailure(error: unknown): { reason: MemberFailure; message: string } | null {
+  if (!(error instanceof NoOperatorIdentity)) return null
+  return {
+    reason: error.reason === 'not-configured' ? 'operator-not-configured' : 'operator-inactive',
+    message: error.message,
+  }
+}
 
 function membersUrl(path: string): string | null {
   const base = config().RELAY_BRIDGE_URL
@@ -52,7 +87,7 @@ export async function fetchMember(pubkey: string): Promise<MemberLookup> {
   if (!url) {
     return {
       ok: false,
-      reason: 'not-configured',
+      reason: 'relay-not-configured',
       message: 'RELAY_BRIDGE_URL is not set',
     }
   }
@@ -85,6 +120,8 @@ export async function fetchMember(pubkey: string): Promise<MemberLookup> {
     const body = (await response.json()) as { admitted?: boolean; role?: string | null }
     return { ok: true, admitted: body.admitted === true, role: body.role ?? null }
   } catch (error) {
+    const operator = operatorFailure(error)
+    if (operator) return { ok: false, ...operator }
     return {
       ok: false,
       reason: 'unreachable',
@@ -102,10 +139,12 @@ export async function fetchMember(pubkey: string): Promise<MemberLookup> {
  * than a batch endpoint nobody else needs.
  */
 export async function fetchRoster(): Promise<
-  { ok: true; members: MemberRecord[] } | { ok: false; reason: string; message: string }
+  { ok: true; members: MemberRecord[] } | { ok: false; reason: MemberFailure; message: string }
 > {
   const url = membersUrl('/api/members')
-  if (!url) return { ok: false, reason: 'not-configured', message: 'RELAY_BRIDGE_URL is not set' }
+  if (!url) {
+    return { ok: false, reason: 'relay-not-configured', message: 'RELAY_BRIDGE_URL is not set' }
+  }
 
   try {
     const response = await withOperatorSecretKey((secretKey) =>
@@ -123,6 +162,8 @@ export async function fetchRoster(): Promise<
     const body = (await response.json()) as { members?: MemberRecord[] }
     return { ok: true, members: body.members ?? [] }
   } catch (error) {
+    const operator = operatorFailure(error)
+    if (operator) return { ok: false, ...operator }
     return {
       ok: false,
       reason: 'unreachable',

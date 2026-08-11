@@ -43,6 +43,27 @@ import { operatorConfigured } from './operator-key.js'
  */
 export type AdmissionStatus = 'admitted' | 'not-admitted' | 'unknown'
 
+/**
+ * Why nobody could answer (PEEK-102).
+ *
+ * `unknown` had four causes and one appearance. A grey chip meant "no operator
+ * configured", "the operator identity is not active", "the operator is not an
+ * admin at the relay" or "the relay is unreachable" — indistinguishable, and
+ * indistinguishable also from the pre-PEEK-94 state where nothing could be read
+ * at all.
+ *
+ * That is how offboarding the operator hid: the console looked exactly as it had
+ * the day before. Every one of these was already computed down in
+ * `nostr/members.ts` and thrown away one layer up, so this carries it rather
+ * than discovering anything new.
+ */
+export type AdmissionUnknownReason =
+  | 'relay-not-configured'
+  | 'operator-not-configured'
+  | 'operator-inactive'
+  | 'forbidden'
+  | 'unreachable'
+
 export interface AdmissionPort {
   /** One pubkey's standing. */
   getAdmissionStatus(pubkey: string): Promise<AdmissionStatus>
@@ -55,6 +76,16 @@ export interface AdmissionPort {
    * which costs nothing while every answer is a constant.
    */
   getAdmissionStatuses(pubkeys: readonly string[]): Promise<Map<string, AdmissionStatus>>
+
+  /**
+   * Why the last read could not answer, or `null` when it could.
+   *
+   * Deliberately a property of the *port* rather than of each row: the causes
+   * are all workspace-wide — a missing config, a disabled operator, an
+   * unreachable relay — so hanging one on every person would repeat a single
+   * fact N times and imply it was measured per pubkey.
+   */
+  lastUnknownReason(): AdmissionUnknownReason | null
 }
 
 /**
@@ -75,6 +106,11 @@ export class UnobservableAdmission implements AdmissionPort {
     )
     return new Map(entries)
   }
+
+  /** Constant: this implementation is chosen precisely when no operator exists. */
+  lastUnknownReason(): AdmissionUnknownReason {
+    return 'operator-not-configured'
+  }
 }
 
 /**
@@ -86,9 +122,27 @@ export class UnobservableAdmission implements AdmissionPort {
  * still worth showing, and this column has always been allowed to say nothing.
  */
 export class RelayAdmission implements AdmissionPort {
+  /**
+   * Why the most recent read came back empty-handed.
+   *
+   * Held on the instance rather than returned alongside each status, because
+   * every cause is workspace-wide and returning it per row would imply it was
+   * measured per pubkey. Set on every read, including the successful ones —
+   * a stale reason outliving the outage that caused it is its own wrong answer.
+   */
+  #unknownReason: AdmissionUnknownReason | null = null
+
+  lastUnknownReason(): AdmissionUnknownReason | null {
+    return this.#unknownReason
+  }
+
   async getAdmissionStatus(pubkey: string): Promise<AdmissionStatus> {
     const result = await fetchMember(pubkey)
-    if (!result.ok) return 'unknown'
+    if (!result.ok) {
+      this.#unknownReason = result.reason
+      return 'unknown'
+    }
+    this.#unknownReason = null
     return result.admitted ? 'admitted' : 'not-admitted'
   }
 
@@ -99,8 +153,12 @@ export class RelayAdmission implements AdmissionPort {
     // authenticated round trips to paint one screen, and the roster is a
     // workspace's worth of rows.
     const roster = await fetchRoster()
-    if (!roster.ok) return new Map(pubkeys.map((pubkey) => [pubkey, 'unknown' as const]))
+    if (!roster.ok) {
+      this.#unknownReason = roster.reason
+      return new Map(pubkeys.map((pubkey) => [pubkey, 'unknown' as const]))
+    }
 
+    this.#unknownReason = null
     const admitted = new Set(roster.members.map((member) => member.pubkey.toLowerCase()))
     return new Map(
       pubkeys.map((pubkey) => [
