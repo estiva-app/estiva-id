@@ -2,10 +2,15 @@
  * PEEK-66: *"offboarding is one action, and the person can no longer read or
  * write anything on the relay."*
  *
- * The second clause is the interesting one, because **this service cannot
- * deliver it**. Buzz owns admission and exposes no way to drive it, so the
- * honest outcome is three steps of four plus a named outstanding one — and the
- * test that matters most is the one asserting we do not claim otherwise.
+ * The second clause used to be undeliverable: Buzz appeared to expose no way to
+ * drive admission, so the honest outcome was three steps of four plus a named
+ * outstanding one.
+ *
+ * **PEEK-94 closed it** — the relay accepts a signed kind:9031 through the same
+ * bridge this service already publishes to. So the fourth step now happens, and
+ * what these tests pin is the pair of contracts that replaced "never claims":
+ * it is done when it is done, and when it is *not* done the result says so and
+ * hands back the command, rather than reporting a success that is not true.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { closePool, queryOne } from '../db/pool.js'
@@ -124,16 +129,54 @@ describe('the step this service cannot take', () => {
    * The heart of the ticket: *"if not, it can only do three of the four and
    * must say so loudly rather than reporting success."*
    */
-  it('never claims relay admission was revoked', async () => {
+  /**
+   * With no operator identity configured there is nothing to sign a kind:9031
+   * with, so the fourth step cannot happen — and the result must say so rather
+   * than quietly reporting three of four as success. This is the pre-PEEK-94
+   * behaviour, reached deliberately instead of by failing.
+   */
+  it('says the admission step did not happen when it could not', async () => {
     const leaver = await person('leaver@example.test')
     relayAccepts()
 
     const result = await offboardPerson(leaver.id)
 
     expect(result.relayAdmission.revoked).toBe(false)
-    expect(result.relayAdmission.reason).toBe('buzz_owns_admission')
+    expect(result.relayAdmission.reason).toContain('RELAY_OPERATOR_USER_ID')
   })
 
+  /**
+   * The step that PEEK-94 made possible. Signed as the operator, not the
+   * leaver: the relay requires an admin or owner, and a leaver is neither —
+   * which is precisely why signing as the subject would fail in the only case
+   * that matters.
+   */
+  it('revokes admission when an operator identity exists', async () => {
+    const operator = await createUserWithKey({ displayName: 'Relay Operator', kind: 'role' })
+    process.env.RELAY_OPERATOR_USER_ID = operator.id
+    const { resetConfigForTests } = await import('../config.js')
+    resetConfigForTests()
+
+    try {
+      const leaver = await person('leaver@example.test')
+      relayAccepts()
+
+      const result = await offboardPerson(leaver.id)
+
+      expect(result.relayAdmission.revoked).toBe(true)
+      expect(result.relayAdmission.command).toBeUndefined()
+
+      const audit = await listAudit({ userId: leaver.id, action: 'user.offboard' })
+      expect(audit[0]?.detail).toMatchObject({ relayAdmissionRevoked: true })
+    } finally {
+      process.env.RELAY_OPERATOR_USER_ID = ''
+      resetConfigForTests()
+    }
+  })
+
+  // Only when the step did not happen — a command handed back beside a success
+  // invites somebody to run it again, which for an add would be a no-op and for
+  // a remove is merely confusing.
   it('hands back the exact command, with the pubkey already in it', async () => {
     const leaver = await person('leaver@example.test')
     relayAccepts()
