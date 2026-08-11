@@ -19,9 +19,9 @@ const PEEK: AppPolicy = {
   status: 'active',
 }
 
-const LINEAR_LITE: AppPolicy = {
-  clientId: 'linear-lite',
-  name: 'linear-lite',
+const SHIP: AppPolicy = {
+  clientId: 'estiva-ship',
+  name: 'estiva-ship',
   allowedKinds: [30850, 30851, 1851, 9, 5, 31989],
   nip98UrlPrefixes: [],
   status: 'active',
@@ -36,8 +36,8 @@ describe('kind allowlists', () => {
     for (const kind of PEEK.allowedKinds) {
       expect(evaluateSignPolicy(event(kind), PEEK, [RELAY]).allowed).toBe(true)
     }
-    for (const kind of LINEAR_LITE.allowedKinds) {
-      expect(evaluateSignPolicy(event(kind), LINEAR_LITE, [RELAY]).allowed).toBe(true)
+    for (const kind of SHIP.allowedKinds) {
+      expect(evaluateSignPolicy(event(kind), SHIP, [RELAY]).allowed).toBe(true)
     }
   })
 
@@ -59,7 +59,7 @@ describe('kind allowlists', () => {
 
 describe('kind:0 is never signable through /sign', () => {
   it('refuses kind:0 for every app', () => {
-    for (const app of [PEEK, LINEAR_LITE]) {
+    for (const app of [PEEK, SHIP]) {
       expect(evaluateSignPolicy(event(0), app, [RELAY])).toMatchObject({
         allowed: false,
         reason: 'kind_profile_forbidden',
