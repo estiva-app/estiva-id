@@ -49,12 +49,13 @@ import {
   findInvite,
 } from '../../domain/invites.js'
 import { getActivePubkey } from '../../domain/keys.js'
-import { saveProfile } from '../../domain/profile.js'
+import { publishProfile, saveProfile } from '../../domain/profile.js'
 import {
   type RecoveryRejection,
   consumeRecoveryForUser,
   findRecovery,
 } from '../../domain/recovery.js'
+import { admitMember } from '../../domain/relay-membership.js'
 import {
   SESSION_COOKIE,
   createSession,
@@ -255,10 +256,9 @@ export function authRoutes(): Hono<AppEnv> {
     // than a first — that path shares this route and has no invite.
     const consumed = await consumeInviteForUser(claimed.userId)
 
-    // The handle the admin reserved. Stored, not published: the relay runs
-    // closed, so publishing would fail until the pubkey is admitted (PEEK-36),
-    // and reporting that failure during sign-up would be noise. The account
-    // page publishes on the next save.
+    // The handle the admin reserved, stored locally. Publishing it is deferred
+    // until after admission below — a `kind:0` sent to a closed relay by a
+    // pubkey it does not yet admit is simply dropped.
     if (consumed?.handle) {
       try {
         await saveProfile(claimed.userId, { handle: consumed.handle })
@@ -286,6 +286,66 @@ export function authRoutes(): Hono<AppEnv> {
         userAgent: c.req.header('user-agent'),
       }),
     ])
+
+    /*
+      Admission — the leg that made "add a person" three-quarters of an action
+      (PEEK-65).
+
+      Onboarding is two operations against two systems, and until PEEK-94 this
+      service could only do the first. So somebody could be invited, enrol a
+      passkey, sign in here, and still read nothing in either app: the relay runs
+      closed and had never heard of their pubkey. The ticket's done-when is that
+      a colleague signs into *both apps* having only touched a passkey, and this
+      is the step that makes that true.
+
+      Only on a first enrolment. A second device adds a passkey to an account
+      whose pubkey was admitted the first time round, and re-asking would be a
+      round trip to be told `alreadyInState`.
+
+      **Failure does not fail enrolment.** The person has a working passkey and a
+      session; refusing here would strand an account they can already
+      authenticate to, over a step an admin can complete from the people list.
+      It is recorded instead, and the row shows "Not admitted" until it is fixed
+      — which is exactly what that column is for.
+    */
+    if (consumed && pubkey) {
+      const admission = await admitMember(pubkey)
+      await recordAudit({
+        actorType: 'system',
+        action: 'relay.admit',
+        outcome: admission.ok ? 'success' : 'error',
+        subjectPubkey: pubkey,
+        detail: {
+          subjectUserId: claimed.userId,
+          viaEnrolment: true,
+          ...(admission.ok ? {} : { reason: admission.reason }),
+        },
+        requestId: c.get('requestId'),
+      })
+
+      if (!admission.ok) {
+        c.get('log').warn(
+          { userId: claimed.userId, pubkey, reason: admission.reason },
+          'enrolled but not admitted to the relay',
+        )
+      }
+
+      /*
+        Now the handle can mean something. Publishing before admission would
+        have the relay drop the event, leaving a handle that resolves nowhere —
+        which is why this was previously left for the account page's next save,
+        a step nobody knew they had to take.
+      */
+      if (admission.ok && consumed.handle) {
+        const outcome = await publishProfile(claimed.userId, { requestId: c.get('requestId') })
+        if (!outcome.published) {
+          c.get('log').warn(
+            { userId: claimed.userId, handle: consumed.handle, reason: outcome.reason },
+            'admitted but could not publish the invited handle',
+          )
+        }
+      }
+    }
 
     await recordAudit({
       actorType: 'user',
