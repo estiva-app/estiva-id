@@ -355,9 +355,9 @@ Full runbook, including the relay half: [OFFBOARDING.md](OFFBOARDING.md).
 | `GET` | `/.well-known/openid-configuration` | — | Discovery. |
 | `GET` | `/.well-known/jwks.json` | — | Active key plus any `previous` one. |
 | `GET` | `/authorize` | Session | Browser redirect. Issues an authorization code. |
-| `POST` | `/token` | Session **or** code | Two grants — see below. |
+| `POST` | `/token` | Session, code **or** client secret | Three grants — see below. |
 
-### Two grants, and why both exist
+### Three grants, and why each exists
 
 **`authorization_code` with PKCE** is how an app on another origin gets a token.
 It has to be a redirect flow: the session cookie is `SameSite=Lax` and this
@@ -369,8 +369,22 @@ custodied signing key.
 origin, and making it round-trip through a redirect to reach its own backend
 would be ceremony with nothing to show for it.
 
+**`client_credentials`** is how a **role identity** signs (PEEK-34). A bot has
+nobody to sign in, so before it existed a role could hold a custodied key it
+could never use. A server-side app authenticates with its own secret and gets a
+token for the identity it is registered to act as — no person anywhere in the
+flow.
+
+That secret **buys** a token rather than being one, so a bot is bounded by the
+same `JWT_TTL_SECONDS` as everybody else and disabling it takes effect just as
+fast. It makes such an app a *confidential* client, which browser apps are not
+and must never be — a secret shipped in a bundle is public — so the grant
+refuses any credential without a stored secret hash, and a database constraint
+stops one being pointed at an identity without a secret. Peek and Ship are
+public clients and stay that way.
+
 The body selects the grant; there is one endpoint, which is what discovery
-advertises.
+advertises — now as `["authorization_code", "client_credentials"]`.
 
 ### `GET /authorize`
 
@@ -410,7 +424,17 @@ or, from this origin with a session cookie:
 { "clientId": "estiva-peek" }
 ```
 
-Both return the same body. **Every code-grant refusal is `invalid_grant`** —
+or, as a role identity's custodian:
+
+```json
+{ "grantType": "client_credentials", "clientId": "…", "clientSecret": "…" }
+```
+
+All three return the same body. **Every `client_credentials` refusal is
+`invalid_client`**, whether the client is unknown, the secret is wrong, the
+client is public, or the identity has been offboarded — telling them apart would
+make this endpoint an oracle for enumerating credentials. Which it was is in the
+audit log. **Every code-grant refusal is `invalid_grant`** —
 unknown, expired, replayed, wrong verifier and wrong redirect URI are one
 answer to the caller and distinct reasons in `audit_events`. The distinction
 matters to us; handing it to a redeemer is handing them a probe.
@@ -487,8 +511,19 @@ Per-app rows in `app_credentials`:
 
 | App | `client_id` | Kinds |
 | --- | --- | --- |
-| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007 |
-| Estiva Projects (linear-lite) | `linear-lite` | 30850, 30851, 1851, 9, 5, 31989 |
+| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235 |
+| Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 31989, 27235 |
+
+**9007 is the container, not an afterthought.** Ship's Folder carries the `h`
+tag every project, issue, change and message references, and `createProject`
+publishes it *before* the Project — so omitting it left Ship able to add to a
+folder somebody else made and unable to create its first one (PEEK-97). Listing
+an app's object kinds without their container is not a lower ceiling, it is a
+broken one. The same number is a huddle for Peek: this list says what an app may
+sign, not what a kind means.
+
+A **service credential** (PEEK-34) carries its own kinds the same way, set when
+an admin mints it.
 
 NIP-98 URLs must be allowed by **both** `SIGN_NIP98_ALLOWED_URL_PREFIXES` (the
 deployment's outer bound) and the app's `nip98_url_prefixes`. Both default to
