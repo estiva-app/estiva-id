@@ -160,7 +160,9 @@ All three need revisiting for real production use.
   validates JWTs statelessly against JWKS, so a leaver holding a live token
   keeps their Peek session until it expires. The relay side is instant; the app
   side is not. Mitigation stays cheap — TTL plus refresh is a config value
-  (`JWT_TTL_SECONDS`, currently 600s), not a rewrite.
+  (`JWT_TTL_SECONDS`, currently 3600s), not a rewrite. Raised from 600s because
+  no refresh grant exists yet (PEEK-108); until one does, this window is the
+  cost of usable browser sessions.
 * **Estiva ID is a single point of failure.** After Stage 2 no app can sign
   locally, so if this is down, nobody can publish anywhere. Worth getting right
   now: failure must be **loud**. Linear-lite already surfaces publish failures
