@@ -55,9 +55,14 @@ somebody's login working.
 
 Effects here are immediate. **Estiva Peek is not**: it validates JWTs
 statelessly against JWKS, so a leaver holding a live token keeps their Peek
-session until it expires — at most `JWT_TTL_SECONDS`, currently 600. That window
+session until it expires — at most `JWT_TTL_SECONDS`, currently 3600. That window
 is a config value, not a rewrite, and it is a known accepted cost
 ([OPEN-SEAMS.md](OPEN-SEAMS.md)).
+
+**It was 600, and raising it made offboarding six times slower.** That is the
+price paid for browser sessions that do not interrupt every ten minutes, and it
+is only payable because there is no refresh grant yet — PEEK-108 is what lets
+this go back down without the interruptions coming back.
 
 ### 2. The relay — only if the console says it did not happen
 
