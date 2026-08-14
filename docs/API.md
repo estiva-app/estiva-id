@@ -620,7 +620,7 @@ Per-app rows in `app_credentials`:
 
 | App | `client_id` | Kinds |
 | --- | --- | --- |
-| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235 |
+| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851 |
 | Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 31989, 27235 |
 
 **9007 is the container, not an afterthought.** Ship's Folder carries the `h`

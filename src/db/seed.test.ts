@@ -41,6 +41,16 @@ describe('seeded signing policies', () => {
     }
   })
 
+  it('lets Peek sign the Change kind it needs to act on a Ship object', () => {
+    // Acting on another app's object means writing *that app's* kind: Peek's
+    // `buildActionEvent` takes it from the target's own manifest, so changing a
+    // Ship project's status from Peek is necessarily a kind:1851. Without it
+    // `/sign` refuses with `kind_not_allowed` at the last step, after the
+    // manifest has already agreed the action is offered — which is exactly how
+    // it failed in the demo.
+    expect(app('estiva-peek').allowedKinds).toContain(SHIP.CHANGE)
+  })
+
   it('no longer seeds the retired linear-lite credential', () => {
     // Phase 3 of PEEK-98. Leaving it here would mean the next re-seed
     // recreating the row somebody deleted on the box.

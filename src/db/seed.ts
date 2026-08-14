@@ -40,7 +40,20 @@ export const SEED_APPS: readonly SeedApp[] = [
     // PEEK-71: 9 (chat message), 7 (reaction), 5 (deletion), 9007 (huddle).
     // 27235 is NIP-98 HTTP auth — without it the app cannot authenticate to the
     // relay's bridge at all, so it can hold a signed event and still not publish.
-    allowedKinds: [9, 7, 5, 9007, 27235],
+    //
+    // 1851 is Ship's Change kind, and it is here because **acting on another
+    // app's object means writing that app's kind**. Peek does not choose it:
+    // `buildActionEvent` takes the kind from the target app's own manifest
+    // (`manifest.records`), so a status change on a Ship project is necessarily
+    // a kind:1851. Without it `/sign` refuses with `kind_not_allowed` and the
+    // action fails at the last step, after the manifest has already agreed.
+    //
+    // This is a ceiling, not a grant of meaning: it says Peek may sign a 1851,
+    // not that Peek decides what one means. The relay still applies its own
+    // membership and authorization checks. Any further cross-app action Peek
+    // offers will need the same treatment — the kind list has to be the union
+    // of what Peek writes for itself and what the apps it acts on declare.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
