@@ -24,6 +24,20 @@
  * Peek may act as you, inside Estiva, would be theatre. This changes the moment
  * a third-party app is registered, and that is the trigger to revisit it rather
  * than a general rule.
+ *
+ * ## `prompt=none` — the session probe an app shell boots on (PEEK-117)
+ *
+ * An app cannot ask this service whether a browser has a session any other way.
+ * The cookie is `SameSite=Lax` and no CORS is served, so a `fetch` and a hidden
+ * iframe are both blocked by design — a top-level navigation is the only thing
+ * that carries the cookie, and that is not an accident to work around.
+ *
+ * So the probe *is* the redirect, and `prompt=none` only changes what happens
+ * when it finds nothing: instead of parking the person on this origin's sign-in
+ * page, it sends them back to the app with `error=login_required`. That single
+ * difference is what lets an app own its own bootstrap — the shell asks, gets a
+ * definite answer, and decides what to render. Without it every cold load with
+ * no session ends on a screen belonging to a different product.
  */
 import { Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
@@ -54,6 +68,12 @@ const requestSchema = z.object({
   code_challenge_method: z.literal(CODE_CHALLENGE_METHOD),
   state: z.string().min(1).max(512).optional(),
   scope: z.string().optional(),
+  /**
+   * `none` is the only value. Anything else is refused rather than ignored: a
+   * client asking for `login` or `consent` is asking for behaviour this service
+   * does not have, and silently giving it the default would look like it worked.
+   */
+  prompt: z.literal('none').optional(),
 })
 
 /** Send the person back to the app with an OAuth error, preserving `state`. */
@@ -87,7 +107,7 @@ export function authorizeRoutes(): Hono<AppEnv> {
         })),
       })
     }
-    const { client_id, redirect_uri, code_challenge, state } = parsed.data
+    const { client_id, redirect_uri, code_challenge, state, prompt } = parsed.data
 
     const app = await findAppPolicy(client_id)
     if (!app || app.status !== 'active') {
@@ -115,8 +135,27 @@ export function authorizeRoutes(): Hono<AppEnv> {
      * Only the path and query are carried, never an absolute URL: `next` is
      * attacker-influenced and an open redirect here would defeat the
      * allowlisting above.
+     *
+     * Unless the caller asked not to be prompted, in which case the honest
+     * answer goes back to the app instead. `login_required` is the OIDC
+     * spelling and it is a *successful probe with a negative result*, not an
+     * error in the request — the shell that sent it is expecting exactly this
+     * and will offer the passkey in place.
      */
     if (!session) {
+      if (prompt === 'none') {
+        // The app is the actor: there is no user to name, which is the result
+        // being recorded. `refused` rather than `error` — nothing went wrong.
+        await recordAudit({
+          actorType: 'app',
+          actorClientId: client_id,
+          action: 'authorize.probe',
+          outcome: 'refused',
+          detail: { reason: 'login_required' },
+          requestId: c.get('requestId'),
+        })
+        return c.redirect(redirectWithError(redirect_uri, 'login_required', state).toString(), 302)
+      }
       const next = `${c.req.path}?${new URL(c.req.url).searchParams.toString()}`
       return c.redirect(`/?next=${encodeURIComponent(next)}`, 302)
     }
