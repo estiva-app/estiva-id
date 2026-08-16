@@ -39,7 +39,7 @@ Two authentication modes:
 | `POST` | `/auth/login/options` | — | Usernameless: no `allowCredentials`. |
 | `POST` | `/auth/login/verify` | — | Body is the WebAuthn assertion. Sets the session cookie. |
 | `POST` | `/auth/credentials/options` | Session | Enrol **another** passkey on an existing account. Verify with `/auth/register/verify`. |
-| `POST` | `/auth/logout` | Session | Revokes the session. |
+| `POST` | `/auth/logout` | Session | Revokes the session. Same-origin only — see `GET /logout` for apps. |
 | `GET` | `/me` | Session | `{ id, email, displayName, status, role, pubkey }`. |
 | `GET` | `/me/credentials` | Session | Summaries only — no public keys, no raw credential ids. |
 | `DELETE` | `/me/credentials/:id` | Session | `404` if not yours. `409` if it is your only passkey. |
@@ -457,11 +457,46 @@ so does this. Refused with `400` for an identity that is not `active`
 (`not_active`) — admitting somebody this service has disabled would re-open the
 half offboarding closed — or that holds no key (`no_key`).
 
+## Ending a session from an app
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/logout` | — | RP-initiated logout. Revokes the session and redirects back. |
+
+```
+/logout?client_id=…&post_logout_redirect_uri=…&state=…
+```
+
+`POST /auth/logout` cannot be reached from another origin — the cookie is
+`SameSite=Lax` and no CORS is served, so a cross-origin `POST` carries no
+session and logs nobody out. This is the same constraint that made `/authorize`
+a redirect, with the same answer: a top-level navigation (PEEK-122).
+
+`post_logout_redirect_uri` is validated against **the same registered list as
+`/authorize`**, exact-match, before anything is revoked. This endpoint answers
+without a session, so an unvalidated URI would be an open redirector that needs
+no credentials at all to reach.
+
+**Idempotent.** Logging out a browser that has no session is a `302`, not a
+`401` — the caller's intent is "make there be no session", and there being none
+already satisfies it.
+
+**It does not revoke tokens already issued.** Access tokens are stateless JWTs
+living up to `JWT_TTL_SECONDS`, so an app tab that is already open keeps working
+until its expires. What this guarantees is narrower and exact: **no new entry
+succeeds.** Every app asks for a passkey the next time it boots. Closing the
+remaining window needs PEEK-108 or a per-call revocation check.
+
+A `GET` end-session endpoint is CSRF-able — a third party can force a logout.
+That is the accepted shape of OIDC RP-initiated logout: nothing is disclosed,
+the impact is annoyance, and a form POST from the app's origin cannot carry the
+cookie here anyway.
+
 ## Tokens and discovery
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| `GET` | `/.well-known/openid-configuration` | — | Discovery. |
+| `GET` | `/.well-known/openid-configuration` | — | Discovery, including `end_session_endpoint`. |
 | `GET` | `/.well-known/jwks.json` | — | Active key plus any `previous` one. |
 | `GET` | `/authorize` | Session | Browser redirect. Issues an authorization code. |
 | `POST` | `/token` | Session, code **or** client secret | Three grants — see below. |

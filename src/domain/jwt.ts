@@ -210,6 +210,12 @@ export function discoveryDocument(): Record<string, unknown> {
     jwks_uri: `${issuer}/.well-known/jwks.json`,
     authorization_endpoint: `${issuer}/authorize`,
     token_endpoint: `${issuer}/token`,
+    // RP-initiated logout (PEEK-122). Advertised because an app cannot end a
+    // session any other way — the cookie is SameSite=Lax and no CORS is served,
+    // so a cross-origin POST to /auth/logout carries nothing and logs nobody
+    // out. It takes `post_logout_redirect_uri`, validated against the same
+    // registered list as /authorize.
+    end_session_endpoint: `${issuer}/logout`,
     response_types_supported: ['code'],
     // `client_credentials` is how a role identity signs, with no person in the
     // flow at all (PEEK-34). Advertised because a relying party configuring
