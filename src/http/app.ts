@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth.js'
 import { authorizeRoutes } from './routes/authorize.js'
 import { directoryRoutes } from './routes/directory.js'
 import { inviteRoutes } from './routes/invites.js'
+import { logoutRoutes } from './routes/logout.js'
 import { profileRoutes } from './routes/profile.js'
 import { signRoutes } from './routes/sign.js'
 import { tokenRoutes } from './routes/tokens.js'
@@ -69,6 +70,7 @@ export function createApp(): Hono<AppEnv> {
 
   app.route('/', authRoutes())
   app.route('/', authorizeRoutes())
+  app.route('/', logoutRoutes())
   app.route('/', inviteRoutes())
   app.route('/', tokenRoutes())
   app.route('/', signRoutes())
