@@ -96,6 +96,22 @@ export async function setUserStatus(
       'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
       [userId],
     )
+
+    /**
+     * Refresh tokens die with the account, in the same transaction (PEEK-108).
+     *
+     * Redemption already re-checks both the session and the user's status, so
+     * this is the third independent thing that would have to fail before an
+     * offboarded person could renew. It is here anyway because a long-lived
+     * credential outliving the account it belongs to is the failure worth
+     * three checks, and because "offboarding revokes refresh" should be a
+     * statement in the code rather than a property you derive from a join.
+     */
+    await client.query(
+      'update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null',
+      [userId],
+    )
+
     return { sessionsRevoked: revoked.rowCount ?? 0 }
   })
 

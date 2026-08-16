@@ -527,8 +527,15 @@ refuses any credential without a stored secret hash, and a database constraint
 stops one being pointed at an identity without a secret. Peek and Ship are
 public clients and stay that way.
 
+**`refresh_token`** is how a browser app survives its access token expiring
+without a top-level redirect (PEEK-108). Before it existed there was nothing to
+exchange, so an expiry cost the page and everything on it — and the mitigation
+was an hour-long access token, which bought comfort by widening the window a
+leaked one stays useful. With this the access token is back to **ten minutes**.
+
 The body selects the grant; there is one endpoint, which is what discovery
-advertises — now as `["authorization_code", "client_credentials"]`.
+advertises — now as `["authorization_code", "client_credentials",
+"refresh_token"]`.
 
 ### `GET /authorize`
 
@@ -608,8 +615,42 @@ A code is single-use, lives 60 seconds, and is **burned on any redemption
 attempt**, successful or not: one that has been presented has been in the wild.
 
 ```json
-{ "access_token": "…", "token_type": "Bearer", "expires_in": 600, "pubkey": "…", "issuer": "…" }
+{ "access_token": "…", "token_type": "Bearer", "expires_in": 600, "pubkey": "…",
+  "issuer": "…", "refresh_token": "…" }
 ```
+
+`refresh_token` comes back from the **code** and **refresh** grants only. The
+session grant is same-origin and `client_credentials` has a secret it can
+present again, so neither needs one, and handing a long-lived credential to a
+caller with no use for it is pure downside.
+
+### `refresh_token`
+
+```json
+{ "grantType": "refresh_token", "refreshToken": "…", "clientId": "estiva-peek" }
+```
+
+A refresh token is the most dangerous thing this service gives a public client:
+long-lived, and stored where nothing can keep a secret. Three properties are
+what make that acceptable, and all three are load-bearing.
+
+**It rotates.** Every redemption returns a new token and spends the old one, so
+a stolen copy stops working the moment the real app refreshes.
+
+**A replay burns the chain.** Presenting an already-spent token is not a retry —
+it means two parties hold the same credential. There is no way to tell the thief
+from the victim, so *every* token in the lineage is revoked, including the
+newest, and both are signed out. Without this, rotation is bookkeeping. It is
+audited as `outcome: error` rather than `refused`, so it is greppable as the
+security event it is.
+
+**It is only as alive as its session.** Redemption re-checks the session, the
+app and the person's status. So `/logout` and offboarding end refresh
+immediately, rather than leaving a credential that quietly renews a session
+somebody thought they had ended.
+
+Every refusal is `invalid_grant`, with the reason in `audit_events` — same
+posture as the code grant, and for the same reason.
 
 Claims: `iss` = issuer origin, `sub` = **the user's pubkey**, `aud` = the app's
 `client_id`. RS256 — **not** ES256, because Convex rejects ES256 tokens with

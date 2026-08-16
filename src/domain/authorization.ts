@@ -50,15 +50,29 @@ export async function issueAuthorizationCode(input: {
   userId: string
   redirectUri: string
   codeChallenge: string
+  /**
+   * The session that approved this. Carried across the redirect so a refresh
+   * token minted at redemption can inherit the binding (PEEK-108) — this is the
+   * only moment the session is known.
+   */
+  sessionId: string
 }): Promise<IssuedCode> {
   const code = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + CODE_TTL_SECONDS * 1000)
 
   await query(
     `insert into authorization_codes
-       (code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at)
-     values ($1, $2, $3, $4, $5, $6)`,
-    [sha256(code), input.clientId, input.userId, input.redirectUri, input.codeChallenge, expiresAt],
+       (code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at, session_id)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      sha256(code),
+      input.clientId,
+      input.userId,
+      input.redirectUri,
+      input.codeChallenge,
+      expiresAt,
+      input.sessionId,
+    ],
   )
   return { code, expiresAt }
 }
@@ -72,7 +86,8 @@ export type RedemptionFailure =
   | 'verifier_mismatch'
 
 export type Redemption =
-  | { ok: true; userId: string; clientId: string }
+  /** `sessionId` is absent for a code issued before PEEK-108 — see the migration. */
+  | { ok: true; userId: string; clientId: string; sessionId: string | null }
   | { ok: false; reason: RedemptionFailure; userId?: string }
 
 /**
@@ -100,10 +115,11 @@ export async function redeemAuthorizationCode(input: {
       user_id: string
       redirect_uri: string
       code_challenge: string
+      session_id: string | null
       expired: boolean
       consumed: boolean
     }>(
-      `select id, client_id, user_id, redirect_uri, code_challenge,
+      `select id, client_id, user_id, redirect_uri, code_challenge, session_id,
               expires_at <= now() as expired,
               consumed_at is not null as consumed
          from authorization_codes
@@ -137,7 +153,12 @@ export async function redeemAuthorizationCode(input: {
     const matches = expected.length === presented.length && timingSafeEqual(expected, presented)
     if (!matches) return { ok: false, reason: 'verifier_mismatch', userId: row.user_id }
 
-    return { ok: true, userId: row.user_id, clientId: row.client_id }
+    return {
+      ok: true,
+      userId: row.user_id,
+      clientId: row.client_id,
+      sessionId: row.session_id,
+    }
   })
 }
 

@@ -67,27 +67,24 @@ const schema = z.object({
   /**
    * How long an access token lives.
    *
-   * Was ten minutes, which is the right number for an API client that can get
-   * another one on demand. **Nothing here can.** There is no `refresh_token`
-   * grant (PEEK-108), and the session that would authorise a silent renewal is
-   * a `SameSite=Lax` cookie — withheld from the hidden iframe such a renewal
-   * would need, by design. So an expired token costs a browser app a top-level
-   * redirect and whatever was on screen.
+   * **Ten minutes again (PEEK-108).** It was raised to an hour because nothing
+   * could mint a fresher one: there was no refresh grant, and the session that
+   * would authorise a silent renewal is a `SameSite=Lax` cookie, withheld from
+   * the hidden iframe such a renewal would need. So an expired token cost a
+   * browser app a top-level redirect and whatever was on screen, and an hour
+   * was the least-bad trade.
    *
-   * An hour is a compromise, not a target. It stays well inside
-   * `SESSION_TTL_SECONDS`, so a token can never outlive the session that
-   * justified it, and it is deliberately not longer: Peek currently passes
-   * these tokens as Convex action arguments, which Convex surfaces in its
-   * dashboard logs (PEEK-106) — every extra minute is another minute that
-   * credential is useful to anyone reading them.
+   * The refresh grant removes the reason for the trade, so the number goes
+   * back. Every extra minute here is another minute a leaked token stays
+   * useful — and Peek passes these as Convex action arguments, which Convex
+   * surfaces in its dashboard logs (PEEK-106).
    *
-   * PEEK-108 is what lets this go back down.
+   * It also decides how quickly signing out takes effect elsewhere. Access
+   * tokens are stateless and cannot be revoked, so an already-open tab in
+   * another app keeps working until its token expires: ten minutes rather than
+   * an hour (PEEK-122). Refresh *is* revoked, so nothing renews past it.
    */
-  JWT_TTL_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(60 * 60),
+  JWT_TTL_SECONDS: z.coerce.number().int().positive().default(600),
 
   /**
    * URL prefixes that a NIP-98 (kind 27235) event may target. Empty means

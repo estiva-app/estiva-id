@@ -39,6 +39,7 @@ import { recordAudit } from '../../domain/audit.js'
 import { redeemAuthorizationCode } from '../../domain/authorization.js'
 import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { issueRefreshToken, redeemRefreshToken } from '../../domain/refresh.js'
 import { authenticateServiceCredential } from '../../domain/roles.js'
 import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
@@ -69,14 +70,38 @@ const serviceGrantSchema = z.object({
   clientSecret: z.string().min(1),
 })
 
-/** The token body every grant returns. */
-function tokenResponse(issued: { token: string; expiresIn: number; pubkey: string }) {
+/**
+ * The refresh grant (PEEK-108).
+ *
+ * No secret and no verifier: a public client has neither. The refresh token
+ * *is* the credential, which is why it rotates on every use and why presenting
+ * a spent one revokes the whole chain — see `domain/refresh.ts`.
+ */
+const refreshGrantSchema = z.object({
+  grantType: z.literal('refresh_token'),
+  refreshToken: z.string().min(1),
+  clientId: z.string().min(1),
+})
+
+/**
+ * The token body every grant returns.
+ *
+ * `refresh_token` is present only where one was minted — the code and refresh
+ * grants. The session grant is same-origin and the client-credentials grant has
+ * a secret it can present again, so neither needs one, and issuing a long-lived
+ * credential to a caller with no use for it is pure downside.
+ */
+function tokenResponse(
+  issued: { token: string; expiresIn: number; pubkey: string },
+  refreshToken?: string,
+) {
   return {
     access_token: issued.token,
     token_type: 'Bearer',
     expires_in: issued.expiresIn,
     pubkey: issued.pubkey,
     issuer: config().ISSUER_URL,
+    ...(refreshToken ? { refresh_token: refreshToken } : {}),
   }
 }
 
@@ -126,12 +151,26 @@ export function tokenRoutes(): Hono<AppEnv> {
     const serviceGrant = serviceGrantSchema.safeParse(body)
     if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
 
-    // Not the code grant. If it *looked* like one, say so rather than falling
-    // through to a confusing "no session cookie" — a client with a malformed
-    // code request has a cookie problem only by coincidence.
+    const refreshGrant = refreshGrantSchema.safeParse(body)
+    if (refreshGrant.success) return exchangeRefreshToken(c, refreshGrant.data)
+
+    // Not any of the explicit grants. If it *looked* like one, say so rather
+    // than falling through to a confusing "no session cookie" — a client with a
+    // malformed grant request has a cookie problem only by coincidence.
+    //
+    // The issues reported are the ones for the grant it named, not the code
+    // grant's: telling somebody who sent `refresh_token` that their `code` is
+    // missing is a worse error than no error.
     if (typeof body === 'object' && body !== null && 'grantType' in body) {
-      throw badRequest('Invalid authorization_code request', {
-        issues: codeGrant.error.issues.map((issue) => ({
+      const named = (body as { grantType?: unknown }).grantType
+      const failure =
+        named === 'refresh_token'
+          ? refreshGrant.error
+          : named === 'client_credentials'
+            ? serviceGrant.error
+            : codeGrant.error
+      throw badRequest(`Invalid ${typeof named === 'string' ? named : 'grant'} request`, {
+        issues: failure.issues.map((issue) => ({
           path: issue.path.join('.'),
           message: issue.message,
         })),
@@ -253,6 +292,22 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     const issued = await issueToken({ pubkey, clientId: app.clientId })
 
+    /**
+     * A refresh token, so the access token above can be short again (PEEK-108).
+     *
+     * Absent when the code carried no session — a code written before that
+     * column existed, which expires within a minute of the deploy. The app then
+     * gets exactly the old behaviour rather than an error, which is what makes
+     * this deployable without coordinating the two halves.
+     */
+    const refresh = redemption.sessionId
+      ? await issueRefreshToken({
+          clientId: app.clientId,
+          userId: redemption.userId,
+          sessionId: redemption.sessionId,
+        })
+      : null
+
     await recordAudit({
       actorType: 'app',
       actorUserId: redemption.userId,
@@ -260,11 +315,88 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.exchange',
       outcome: 'success',
       subjectPubkey: pubkey,
+      detail: { expiresIn: issued.expiresIn, refresh: refresh !== null },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json(tokenResponse(issued, refresh?.refreshToken))
+  }
+
+  /**
+   * `grant_type=refresh_token` — keeping a session alive without a redirect.
+   *
+   * Before this, an access token expiring cost a browser app a top-level
+   * navigation and everything on screen, because there was nothing to exchange.
+   * The mitigation was an hour-long access token; this is what lets that go
+   * back down.
+   *
+   * **Every refusal is `invalid_grant`, and the reason goes to the audit log**
+   * — same posture as the code grant, for the same reason. But one of them is
+   * not routine: `reused` means two parties presented the same token, and
+   * `redeemRefreshToken` has already revoked the entire chain by the time this
+   * runs. It is recorded as `error` rather than `refused` so it is greppable as
+   * the security event it is.
+   */
+  async function exchangeRefreshToken(
+    c: Context<AppEnv>,
+    input: z.infer<typeof refreshGrantSchema>,
+  ) {
+    const redemption = await redeemRefreshToken({
+      refreshToken: input.refreshToken,
+      clientId: input.clientId,
+    })
+
+    if (!redemption.ok) {
+      await recordAudit({
+        actorType: 'app',
+        actorUserId: redemption.userId,
+        actorClientId: input.clientId,
+        action: 'token.refresh',
+        outcome: redemption.reason === 'reused' ? 'error' : 'refused',
+        detail: { reason: redemption.reason },
+        requestId: c.get('requestId'),
+      })
+      throw badRequest('invalid_grant')
+    }
+
+    // Re-checked on every refresh, not just at sign-in. A refresh grant that
+    // skipped this would let a disabled app or an offboarded person keep
+    // minting tokens for as long as the session lasts, which is exactly the
+    // hole a long-lived credential is expected to close rather than open.
+    const app = await findAppPolicy(input.clientId)
+    if (!app || app.status !== 'active') throw forbidden('Unknown or disabled app')
+
+    const user = await findUserById(redemption.userId)
+    if (!user || user.status !== 'active') {
+      await recordAudit({
+        actorType: 'app',
+        actorUserId: redemption.userId,
+        actorClientId: input.clientId,
+        action: 'token.refresh',
+        outcome: 'refused',
+        detail: { reason: user ? `user_${user.status}` : 'user_missing' },
+        requestId: c.get('requestId'),
+      })
+      throw forbidden('That identity is no longer active')
+    }
+
+    const pubkey = await getActivePubkey(redemption.userId)
+    if (!pubkey) throw forbidden('No active key for this identity')
+
+    const issued = await issueToken({ pubkey, clientId: app.clientId })
+
+    await recordAudit({
+      actorType: 'app',
+      actorUserId: redemption.userId,
+      actorClientId: app.clientId,
+      action: 'token.refresh',
+      outcome: 'success',
+      subjectPubkey: pubkey,
       detail: { expiresIn: issued.expiresIn },
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued))
+    return c.json(tokenResponse(issued, redemption.refreshToken))
   }
 
   /**
