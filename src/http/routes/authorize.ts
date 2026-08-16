@@ -187,6 +187,7 @@ export function authorizeRoutes(): Hono<AppEnv> {
       userId: session.userId,
       redirectUri: redirect_uri,
       codeChallenge: code_challenge,
+      sessionId: session.id,
     })
 
     /**

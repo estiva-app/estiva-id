@@ -220,7 +220,9 @@ export function discoveryDocument(): Record<string, unknown> {
     // `client_credentials` is how a role identity signs, with no person in the
     // flow at all (PEEK-34). Advertised because a relying party configuring
     // itself from discovery should not have to read our source to find it.
-    grant_types_supported: ['authorization_code', 'client_credentials'],
+    // `refresh_token` is what lets a browser app survive its access token
+    // expiring without a top-level redirect (PEEK-108).
+    grant_types_supported: ['authorization_code', 'client_credentials', 'refresh_token'],
     // S256 only. `plain` is permitted by RFC 7636 and protects nothing an
     // interceptor cannot replay, so advertising it would only invite a client
     // to choose it.
