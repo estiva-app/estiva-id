@@ -499,7 +499,7 @@ advertises — now as `["authorization_code", "client_credentials"]`.
 
 ```
 /authorize?client_id=…&redirect_uri=…&response_type=code
-          &code_challenge=…&code_challenge_method=S256&state=…
+          &code_challenge=…&code_challenge_method=S256&state=…&prompt=none
 ```
 
 `code_challenge` is `base64url(sha256(code_verifier))` — 43 characters. **`S256`
@@ -516,6 +516,27 @@ Failures split in two, deliberately:
 
 No session means a `302` to `/?next=<relative path>` so the person can sign in
 and be replayed. Redirect URIs are matched **exactly**, never by prefix.
+
+**`prompt=none` changes only that last sentence** (PEEK-117). With a live
+session it behaves identically — a code goes back to the app. Without one it
+returns `?error=login_required&state=…` to the *app* rather than parking the
+person on this origin's sign-in page.
+
+That is what an app's auth shell boots on. There is no other way for an app to
+ask whether this browser has a session: the cookie is `SameSite=Lax` and no CORS
+is served, so a `fetch` and a hidden iframe are both blocked — deliberately, on
+the origin holding every custodied key. A top-level navigation is the only thing
+that carries the cookie, so the probe *is* the redirect, and behind an app's
+loading shell it is invisible.
+
+`login_required` is a successful probe with a negative result, not a bad
+request. `prompt` accepts **`none` and nothing else**: a client asking for
+`login` or `consent` gets a `400` rather than silently receiving the default.
+
+The unregistered-`redirect_uri` check still runs first, and must: an answer that
+needed no session would otherwise make this the open redirector the rest of the
+route is arranged to prevent. See [AUTH-SHELL.md](AUTH-SHELL.md) for the
+contract apps implement against.
 
 There is no consent screen: every app is first-party. That changes the day a
 third-party app is registered.

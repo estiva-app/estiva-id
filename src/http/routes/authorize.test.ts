@@ -138,6 +138,48 @@ describe('GET /authorize', () => {
     expect(next.startsWith('/authorize?')).toBe(true)
   })
 
+  /**
+   * The probe an app shell boots on (PEEK-117). The difference from the case
+   * above is the whole feature: same missing session, but the answer goes to
+   * the app instead of parking the person on this origin's sign-in page.
+   */
+  it('sends prompt=none back to the app as login_required when there is no session', async () => {
+    const response = await authorize(authorizeUrl({ prompt: 'none' }))
+    expect(response.status).toBe(302)
+
+    const target = new URL(response.headers.get('location') ?? '')
+    expect(target.origin + target.pathname).toBe(REDIRECT)
+    expect(target.searchParams.get('error')).toBe('login_required')
+    expect(target.searchParams.get('state')).toBe('opaque-state')
+    expect(target.searchParams.get('code')).toBeNull()
+  })
+
+  it('issues a code for prompt=none when the session is live, exactly as without it', async () => {
+    const response = await authorize(authorizeUrl({ prompt: 'none' }), cookie)
+    expect(response.status).toBe(302)
+
+    const target = new URL(response.headers.get('location') ?? '')
+    expect(target.searchParams.get('code')).toBeTruthy()
+    expect(target.searchParams.get('error')).toBeNull()
+  })
+
+  /**
+   * An unregistered `redirect_uri` must still be refused *here*, or `prompt=none`
+   * becomes the open redirector the rest of this route is arranged to prevent —
+   * and one that answers without needing a session at all.
+   */
+  it('refuses prompt=none with an unregistered redirect_uri rather than redirecting', async () => {
+    const response = await authorize(
+      authorizeUrl({ prompt: 'none', redirect_uri: 'https://attacker.test/callback' }),
+    )
+    expect(response.status).toBe(400)
+  })
+
+  it('refuses a prompt value it does not implement', async () => {
+    const response = await authorize(authorizeUrl({ prompt: 'consent' }), cookie)
+    expect(response.status).toBe(400)
+  })
+
   it('sends an inactive identity back to the app as access_denied', async () => {
     await query("update users set status = 'offboarded' where id = $1", [ada.id])
 
