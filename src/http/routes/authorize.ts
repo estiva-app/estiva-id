@@ -189,13 +189,23 @@ export function authorizeRoutes(): Hono<AppEnv> {
       codeChallenge: code_challenge,
     })
 
+    /**
+     * `silent` is what makes the auth-shell rates readable (PEEK-120).
+     *
+     * A code issued to a silent probe is somebody entering an app without
+     * touching anything; a code issued without one is somebody who was asked
+     * for a passkey. Recording only that a code was issued collapses the two,
+     * and "how often does entry actually cost a person nothing" is the whole
+     * question this milestone is judged on. With `actor_client_id` already on
+     * the row, Peek and Ship are comparable rather than two unrelated systems.
+     */
     await recordAudit({
       actorType: 'user',
       actorUserId: session.userId,
       actorClientId: client_id,
       action: 'authorize.issue',
       outcome: 'success',
-      detail: { redirectUri: redirect_uri },
+      detail: { redirectUri: redirect_uri, silent: prompt === 'none' },
       requestId: c.get('requestId'),
     })
 
