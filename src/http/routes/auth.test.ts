@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { config } from '../../config.js'
-import { closePool, queryOne } from '../../db/pool.js'
+import { closePool, query, queryOne } from '../../db/pool.js'
 import { createInvite } from '../../domain/invites.js'
 import { SoftwareAuthenticator } from '../../test/authenticator.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
@@ -201,6 +201,67 @@ describe('multiple devices', () => {
     await register('ada@example.test')
     const response = await post('/auth/credentials/options', {})
     expect(response.status).toBe(401)
+  })
+
+  /**
+   * The 2026-08-17 incident, in three tests.
+   *
+   * A colleague's second passkey failed twice with a 500 and no audit record.
+   * The options asked for `userVerification: 'preferred'`, their authenticator
+   * duly skipped UV, and `verifyRegistrationResponse` — which requires UV unless
+   * told otherwise — threw rather than returning `verified: false`, so the
+   * refusal branch never ran. Their device kept the credential this service had
+   * refused to store, and offered it at every subsequent sign-in.
+   *
+   * The suite missed it because the software authenticator always set UV.
+   */
+  it('asks the authenticator to verify the user, rather than merely preferring it', async () => {
+    const { cookie } = await register('ada@example.test')
+
+    const enrol = await (await post('/auth/credentials/options', {}, cookie)).json()
+    expect(enrol).toMatchObject({
+      authenticatorSelection: { userVerification: 'required' },
+    })
+
+    const login = await (await post('/auth/login/options', {})).json()
+    expect(login).toMatchObject({ userVerification: 'required' })
+  })
+
+  it('refuses an unverified second passkey without a 500, and says so in the audit log', async () => {
+    const { cookie } = await register('ada@example.test')
+
+    const options = (await (await post('/auth/credentials/options', {}, cookie)).json()) as {
+      challenge: string
+    }
+
+    const laptop = authenticator()
+    const enrolled = await post(
+      '/auth/register/verify',
+      laptop.register(options.challenge, { userVerified: false }),
+    )
+    expect(enrolled.status).toBe(403)
+
+    // Nothing was stored, so the credential the device kept is not a passkey here.
+    const list = await app.request('/me/credentials', { headers: { cookie } })
+    await expect(list.json()).resolves.toMatchObject({ credentials: [{ backedUp: false }] })
+
+    const audited = await query<{ outcome: string; detail: Record<string, unknown> }>(
+      "select outcome, detail from audit_events where action = 'passkey.register' and outcome = 'refused'",
+    )
+    expect(audited.rows).toHaveLength(1)
+    expect(audited.rows[0]?.detail).toMatchObject({ reason: 'verification_failed' })
+    expect(String(audited.rows[0]?.detail.refusal)).toContain('user could not be verified')
+  })
+
+  it('refuses an unverified sign-in without a 500', async () => {
+    const { device } = await register('ada@example.test')
+
+    const options = (await (await post('/auth/login/options', {})).json()) as { challenge: string }
+    const login = await post(
+      '/auth/login/verify',
+      device.authenticate(options.challenge, undefined, { userVerified: false }),
+    )
+    expect(login.status).toBe(401)
   })
 
   it('revokes a credential, and the revoked device can no longer sign in', async () => {
