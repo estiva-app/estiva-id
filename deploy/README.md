@@ -340,6 +340,13 @@ Cloudflare R2, a Hetzner Storage Box, anywhere. It just has to be automatic.
 
 - **Backups** (PEEK-63) — the KEK and both databases. Urgent, and needed before
   the first real registration.
-- **Log shipping.** Logs are JSON on stdout, held only by the local journal.
+- **Log shipping.** Logs are JSON on stdout, held only by Docker's json-file
+  driver — `docker logs estiva-id-estiva-id-1`, **not** the journal. The journal
+  has `estiva-id-update` and nothing from the service itself, so a
+  `journalctl | grep` that finds nothing is not evidence a thing never happened;
+  it is evidence you are reading the wrong log. `docker logs` also starts at the
+  last container start, so anything before the previous deploy is simply gone.
+  Until this is shipped somewhere, `audit_events` is the only durable record,
+  and it holds only what the code deliberately audits.
 - **Monitoring.** Nothing watches `/readyz`. Worth fixing before Stage 2, when
   an outage here stops publishing across every app.
