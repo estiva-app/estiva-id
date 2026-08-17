@@ -17,6 +17,10 @@
 import {
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
+  type VerifiedAuthenticationResponse,
+  type VerifiedRegistrationResponse,
+  type VerifyAuthenticationResponseOpts,
+  type VerifyRegistrationResponseOpts,
   generateAuthenticationOptions,
   generateRegistrationOptions,
   verifyAuthenticationResponse,
@@ -125,6 +129,70 @@ const registerSchema = z.object({
 })
 
 /**
+ * What every ceremony here asks of the authenticator.
+ *
+ * `userVerification: 'required'` is not a preference we could soften. Both
+ * `verify*Response` helpers default `requireUserVerification` to `true`, so a
+ * ceremony without the UV flag is refused *after* the fact no matter what we ask
+ * for. Asking for `'preferred'` therefore never widened what this service
+ * accepts — it only moved the refusal to the worst possible place: the
+ * authenticator, told UV was optional, was free to skip it, and the person found
+ * out after their device had already minted and stored the credential.
+ *
+ * That is a passkey the browser keeps offering and this service has never heard
+ * of. It cost a colleague two enrolment attempts on 2026-08-17, and left dead
+ * passkeys on their device that they had to delete by hand.
+ *
+ * Requiring it up front makes the authenticator prompt instead, so a device that
+ * cannot verify its user fails before anything is written down.
+ */
+const AUTHENTICATOR_SELECTION = {
+  residentKey: 'required',
+  userVerification: 'required',
+} as const
+
+/**
+ * Both outcomes of a ceremony we will not accept, flattened into one.
+ *
+ * SimpleWebAuthn reports these two ways: a response failing a check comes back
+ * as `verified: false`, while one that is structurally unacceptable — a clear UV
+ * flag being the case we actually hit — *throws*. Only the first reaches the
+ * refusal branches below, so the throwing half used to escape as an unhandled
+ * 500 that wrote no audit record at all. The attempt vanished: the person saw a
+ * generic server error and the audit log showed nothing between their sign-in
+ * and their next request.
+ *
+ * The thrown message is kept and audited. It is the only description of what the
+ * authenticator actually did wrong, and re-deriving it from a stack trace in the
+ * container log is exactly the work this avoids.
+ */
+type Refused = { verified: false; refusal: string }
+
+function refused(error: unknown): Refused {
+  return { verified: false, refusal: error instanceof Error ? error.message : String(error) }
+}
+
+async function verifyRegistration(
+  options: VerifyRegistrationResponseOpts,
+): Promise<(VerifiedRegistrationResponse & { refusal?: string }) | Refused> {
+  try {
+    return await verifyRegistrationResponse(options)
+  } catch (error) {
+    return refused(error)
+  }
+}
+
+async function verifyAuthentication(
+  options: VerifyAuthenticationResponseOpts,
+): Promise<(VerifiedAuthenticationResponse & { refusal?: string }) | Refused> {
+  try {
+    return await verifyAuthenticationResponse(options)
+  } catch (error) {
+    return refused(error)
+  }
+}
+
+/**
  * The challenge the authenticator actually signed over.
  *
  * Taken from `clientDataJSON` rather than trusted from the request body, then
@@ -199,7 +267,7 @@ export function authRoutes(): Hono<AppEnv> {
       userName: user.email ?? user.id,
       userDisplayName: user.display_name ?? user.email ?? user.id,
       attestationType: 'none',
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: AUTHENTICATOR_SELECTION,
     })
 
     await storeChallenge({
@@ -218,7 +286,7 @@ export function authRoutes(): Hono<AppEnv> {
     const claimed = await consumeChallenge(challenge, 'registration')
     if (!claimed?.userId) throw badRequest('Unknown, expired or already-used challenge')
 
-    const verification = await verifyRegistrationResponse({
+    const verification = await verifyRegistration({
       response,
       expectedChallenge: challenge,
       expectedOrigin: cfg.RP_ORIGINS,
@@ -230,7 +298,7 @@ export function authRoutes(): Hono<AppEnv> {
         actorUserId: claimed.userId,
         action: 'passkey.register',
         outcome: 'refused',
-        detail: { reason: 'verification_failed' },
+        detail: { reason: 'verification_failed', refusal: verification.refusal },
         requestId: c.get('requestId'),
       })
       throw forbidden('Registration could not be verified')
@@ -421,7 +489,7 @@ export function authRoutes(): Hono<AppEnv> {
       userName: user.email ?? user.id,
       userDisplayName: user.display_name ?? user.email ?? user.id,
       attestationType: 'none',
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: AUTHENTICATOR_SELECTION,
       // Deliberately not excluding the existing credentials. They are the ones
       // that were lost, and an authenticator that still holds one would refuse
       // the ceremony rather than replace it.
@@ -442,7 +510,7 @@ export function authRoutes(): Hono<AppEnv> {
     const claimed = await consumeChallenge(challenge, 'recovery')
     if (!claimed?.userId) throw badRequest('Unknown, expired or already-used challenge')
 
-    const verification = await verifyRegistrationResponse({
+    const verification = await verifyRegistration({
       response,
       expectedChallenge: challenge,
       expectedOrigin: cfg.RP_ORIGINS,
@@ -454,7 +522,7 @@ export function authRoutes(): Hono<AppEnv> {
         actorUserId: claimed.userId,
         action: 'recovery.complete',
         outcome: 'refused',
-        detail: { reason: 'verification_failed' },
+        detail: { reason: 'verification_failed', refusal: verification.refusal },
         requestId: c.get('requestId'),
       })
       throw forbidden('Registration could not be verified')
@@ -578,7 +646,7 @@ export function authRoutes(): Hono<AppEnv> {
   routes.post('/auth/login/options', async (c) => {
     const options = await generateAuthenticationOptions({
       rpID: cfg.RP_ID,
-      userVerification: 'preferred',
+      userVerification: 'required',
     })
     await storeChallenge({ challenge: options.challenge, ceremony: 'authentication' })
     return c.json(options)
@@ -610,7 +678,7 @@ export function authRoutes(): Hono<AppEnv> {
       throw forbidden('This account is not active')
     }
 
-    const verification = await verifyAuthenticationResponse({
+    const verification = await verifyAuthentication({
       response,
       expectedChallenge: challenge,
       expectedOrigin: cfg.RP_ORIGINS,
@@ -628,7 +696,7 @@ export function authRoutes(): Hono<AppEnv> {
         actorUserId: user.id,
         action: 'session.create',
         outcome: 'refused',
-        detail: { reason: 'verification_failed' },
+        detail: { reason: 'verification_failed', refusal: verification.refusal },
         requestId: c.get('requestId'),
       })
       throw unauthenticated('Authentication could not be verified')
@@ -687,7 +755,7 @@ export function authRoutes(): Hono<AppEnv> {
       userName: user?.email ?? userId,
       userDisplayName: user?.display_name ?? user?.email ?? userId,
       attestationType: 'none',
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: AUTHENTICATOR_SELECTION,
       // Stops the same authenticator being enrolled twice, which would look
       // like two devices and offer the safety of one.
       excludeCredentials: existing.map((credential) => ({

@@ -115,14 +115,23 @@ export class SoftwareAuthenticator {
     ])
   }
 
-  /** UP | UV | AT — user present, user verified, attested credential data. */
-  register(challenge: string) {
+  /**
+   * UP | UV | AT — user present, user verified, attested credential data.
+   *
+   * `userVerified: false` drops the UV flag, which is what a real authenticator
+   * is free to do whenever the ceremony asked for anything less than
+   * `userVerification: 'required'`. Producing that response is the only way to
+   * test the refusal path: a UV-less attestation is otherwise indistinguishable
+   * from a good one, and hardcoding the flag is how this went unnoticed in
+   * production until somebody's second passkey failed.
+   */
+  register(challenge: string, { userVerified = true }: { userVerified?: boolean } = {}) {
     const clientDataJSON = this.clientData('webauthn.create', challenge)
     const attestationObject = cbor(
       new Map<string, CborValue>([
         ['fmt', 'none'],
         ['attStmt', new Map()],
-        ['authData', this.authData(0x45, true)],
+        ['authData', this.authData(userVerified ? 0x45 : 0x41, true)],
       ]),
     )
 
@@ -140,10 +149,14 @@ export class SoftwareAuthenticator {
   }
 
   /** UP | UV. Increments the signature counter, as a real authenticator does. */
-  authenticate(challenge: string, userHandle?: string) {
+  authenticate(
+    challenge: string,
+    userHandle?: string,
+    { userVerified = true }: { userVerified?: boolean } = {},
+  ) {
     this.signCount += 1
     const clientDataJSON = this.clientData('webauthn.get', challenge)
-    const authData = this.authData(0x05, false)
+    const authData = this.authData(userVerified ? 0x05 : 0x01, false)
 
     const signature = createSign('sha256')
       .update(Buffer.concat([authData, createHash('sha256').update(clientDataJSON).digest()]))
