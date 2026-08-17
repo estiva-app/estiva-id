@@ -3,12 +3,25 @@
  *
  * Four ceremonies:
  *
- *   * `POST /auth/register/options` + `/verify` — a new person enrols.
- *   * `POST /auth/login/options` + `/verify` — an existing person signs in.
- *   * `POST /auth/credentials/options` + `/verify` — an **already signed-in**
- *     person adds another passkey. This is how a second device is enrolled, and
- *     why losing a laptop is an inconvenience rather than an identity loss.
- *   * `GET`/`DELETE /me/credentials` — see and revoke your own.
+ *   * `POST /auth/register/options` + `/auth/register/verify` — a new person
+ *     enrols.
+ *   * `POST /auth/login/options` + `/auth/login/verify` — an existing person
+ *     signs in.
+ *   * `POST /auth/recover/options` + `/auth/recover/verify` — somebody who lost
+ *     every passkey enrols a new one against the identity they already had.
+ *   * `POST /auth/credentials/options`, then **`/auth/register/verify`** — an
+ *     **already signed-in** person adds another passkey. This is how a second
+ *     device is enrolled, and why losing a laptop is an inconvenience rather
+ *     than an identity loss.
+ *
+ * There is no `/auth/credentials/verify`: the add-a-passkey ceremony issues its
+ * own options — session-scoped, and excluding what the person already has — but
+ * then finishes through the registration verifier, because from that point the
+ * two are the same act. Worth knowing before searching for a route that has
+ * never existed.
+ *
+ * Self-service, not ceremonies: `GET`/`DELETE /me/credentials` — see and revoke
+ * your own.
  *
  * Login is usernameless: options carry no `allowCredentials`, so the
  * authenticator offers whatever discoverable credential it holds for this RP.
