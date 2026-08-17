@@ -140,6 +140,13 @@ describe('per-app policy (PEEK-71)', () => {
     })
   })
 
+  it('signs Peek’s own assertion kind', async () => {
+    // PEEK-128. Asserted through the endpoint rather than against SEED_APPS,
+    // because the seeded constant being right is not the same fact as the
+    // running policy accepting the event — the row has to have been re-seeded.
+    expect((await sign(peekToken, { kind: 9101, tags: [], content: '' })).status).toBe(200)
+  })
+
   it('applies the calling app’s policy, not the other app’s', async () => {
     expect((await sign(shipToken, { kind: 30850, tags: [], content: '' })).status).toBe(200)
     expect((await sign(peekToken, { kind: 30850, tags: [], content: '' })).status).toBe(422)

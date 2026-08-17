@@ -16,6 +16,11 @@ const app = (clientId: string) => {
   return found
 }
 
+/** Peek's own kinds, from `peek-app/convex/nostr/events.ts`. */
+const PEEK = {
+  ASSERTION: 9101,
+} as const
+
 /** Ship's kinds, from `estiva-ship/src/kinds.ts`. */
 const SHIP = {
   FOLDER: 9007,
@@ -49,6 +54,18 @@ describe('seeded signing policies', () => {
     // manifest has already agreed the action is offered — which is exactly how
     // it failed in the demo.
     expect(app('estiva-peek').allowedKinds).toContain(SHIP.CHANGE)
+  })
+
+  it('lets Peek sign the assertion kind it publishes for itself', () => {
+    // PEEK-128: kind:9101 says "this thread is resolved" on the wire, so any
+    // app in the suite can read it. Unlike the Change kind above, Peek is not
+    // borrowing another app's kind here — it writes this one for itself.
+    //
+    // Its absence cost a round of live debugging: resolving in Peek published
+    // nothing while every signal inside Peek said it had worked. The Convex row
+    // resolved, the card rendered resolved, and `/sign` refused with
+    // `kind_not_allowed` in a console line nobody was watching.
+    expect(app('estiva-peek').allowedKinds).toContain(PEEK.ASSERTION)
   })
 
   it('no longer seeds the retired linear-lite credential', () => {
