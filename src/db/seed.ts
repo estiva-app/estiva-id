@@ -53,7 +53,18 @@ export const SEED_APPS: readonly SeedApp[] = [
     // membership and authorization checks. Any further cross-app action Peek
     // offers will need the same treatment — the kind list has to be the union
     // of what Peek writes for itself and what the apps it acts on declare.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851],
+    // 9101 is the Estiva assertion (PEEK-128) — "this thread is resolved",
+    // said on the wire so any app in the suite can read it. Peek writes it for
+    // itself, so unlike 1851 above this is not borrowed from another app's
+    // manifest.
+    //
+    // Its absence is the failure this comment block already warns about, two
+    // paragraphs up, and it still cost a round of live debugging: resolving
+    // published nothing, and every signal inside Peek said it had worked. The
+    // Convex row resolved, the card rendered resolved, and `/sign` refused with
+    // `kind_not_allowed` in a console line nobody was watching. A ceiling that
+    // is too low fails at the last step, after everything else has agreed.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
