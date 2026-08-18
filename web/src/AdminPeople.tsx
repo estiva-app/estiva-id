@@ -43,6 +43,8 @@ import {
   offboardPerson,
   reinstatePerson,
 } from './api'
+import { IconArrowLeft } from '@tabler/icons-react'
+import { Select } from './Select'
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
@@ -371,13 +373,14 @@ function InvitePerson() {
             </label>
             <label>
               <span className="label-text">Role</span>
-              <select
+              <Select
                 value={role}
-                onChange={(event) => setRole(event.target.value as 'admin' | 'member')}
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
-              </select>
+                onChange={(next) => setRole(next as 'admin' | 'member')}
+                options={[
+                  { value: 'member', label: 'Member' },
+                  { value: 'admin', label: 'Admin' },
+                ]}
+              />
               <p className="hint">
                 An admin can see this screen, offboard people and invite others.
               </p>
@@ -588,7 +591,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
   return (
     <>
       <button type="button" className="link" onClick={onBack}>
-        ← Back to everyone
+        <IconArrowLeft size={16} stroke={1.5} />
+        Back to everyone
       </button>
 
       <section className="card" style={{ marginTop: '1rem' }}>

@@ -20,6 +20,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, type AuditEntry, listAudit } from './api'
+import { IconArrowRight } from '@tabler/icons-react'
+import { Select } from './Select'
 
 const formatWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
@@ -135,14 +137,14 @@ export function AuditLog({ person, compact = false }: Props) {
         <div className="row" style={{ marginBottom: '1rem' }}>
           <label style={{ margin: 0 }}>
             <span className="label-text">Action</span>
-            <select value={action} onChange={(e) => setAction(e.target.value)}>
-              <option value="">Everything</option>
-              {state.actions.map((name) => (
-                <option key={name} value={name}>
-                  {PHRASE[name] ?? name}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={action}
+              onChange={setAction}
+              options={[
+                { value: '', label: 'Everything' },
+                ...state.actions.map((name) => ({ value: name, label: PHRASE[name] ?? name })),
+              ]}
+            />
           </label>
         </div>
       )}
@@ -187,7 +189,7 @@ function AuditRow({ entry, showSubject }: { entry: AuditEntry; showSubject: bool
         <span className="audit-actor">{actor}</span> {describe(entry)}
         {showTo && (
           <>
-            {' → '}
+            <IconArrowRight size={14} stroke={1.5} className="audit-arrow" />
             <span className="audit-subject">{subject}</span>
           </>
         )}
