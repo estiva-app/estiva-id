@@ -393,4 +393,79 @@ describe('creating one through the console', () => {
     expect(entries.rows).toHaveLength(1)
     expect(JSON.stringify(entries.rows)).not.toContain(clientSecret)
   })
+
+  /**
+   * PEEK-134: an empty box must not mint a bot that cannot read.
+   *
+   * Empty is the right default for the *column* — fail closed — and the wrong
+   * one for a *form*, because an admin who grants 27235 and says nothing about
+   * destinations plainly means "the relay", not "nowhere". `db/seed.ts` already
+   * resolves the same ambiguity the same way, so the route follows it.
+   */
+  async function mintedBot(cookie: string, body: Record<string, unknown>) {
+    const created = await post('/admin/role-identities', { displayName: 'Relay Reader' }, cookie)
+    const { identity } = (await created.json()) as { identity: { id: string } }
+    const minted = await post(`/admin/role-identities/${identity.id}/credential`, body, cookie)
+    return { minted, secret: ((await minted.json()) as { clientSecret: string }).clientSecret }
+  }
+
+  const signAs = async (clientId: string, secret: string, url: string) => {
+    const { access_token } = (await (await tokenFor(clientId, secret)).json()) as {
+      access_token: string
+    }
+    return app.request('/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({
+        event: {
+          kind: 27235,
+          tags: [
+            ['u', url],
+            ['method', 'POST'],
+          ],
+          content: '',
+        },
+      }),
+    })
+  }
+
+  it('mints a bot that can reach the relay when no destination is given', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { secret } = await mintedBot(cookie, {
+      clientId: 'relay-reader',
+      name: 'Relay Reader',
+      allowedKinds: [27235],
+    })
+
+    expect((await signAs('relay-reader', secret, 'http://relay.test/query')).status).toBe(200)
+  })
+
+  // The column is still a ceiling that can be lowered — the default exists to
+  // stop an accident, not to make narrowing unavailable.
+  it('honours an explicit narrower list', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { secret } = await mintedBot(cookie, {
+      clientId: 'relay-reader',
+      name: 'Relay Reader',
+      allowedKinds: [27235],
+      nip98UrlPrefixes: ['http://relay.test/events'],
+    })
+
+    expect((await signAs('relay-reader', secret, 'http://relay.test/events')).status).toBe(200)
+    expect((await signAs('relay-reader', secret, 'http://relay.test/query')).status).toBe(422)
+  })
+
+  it('records what the credential can actually do, not what was asked for', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    await mintedBot(cookie, {
+      clientId: 'relay-reader',
+      name: 'Relay Reader',
+      allowedKinds: [27235],
+    })
+
+    const entry = await queryOne<{ detail: { nip98UrlPrefixes: string[] } }>(
+      "select detail from audit_events where action = 'role.credential'",
+    )
+    expect(entry?.detail.nip98UrlPrefixes).toEqual(['http://relay.test/'])
+  })
 })

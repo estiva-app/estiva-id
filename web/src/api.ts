@@ -238,7 +238,13 @@ export const createRoleIdentity = (displayName: string) =>
 /** The secret comes back once and is stored only as a hash. */
 export const issueServiceCredential = (
   id: string,
-  input: { clientId: string; name: string; allowedKinds: number[] },
+  input: {
+    clientId: string
+    name: string
+    allowedKinds: number[]
+    /** Omitted or empty means every destination this deployment allows. */
+    nip98UrlPrefixes?: string[]
+  },
 ) =>
   request<{ clientId: string; clientSecret: string; pubkey: string | null }>(
     `/admin/role-identities/${encodeURIComponent(id)}/credential`,
