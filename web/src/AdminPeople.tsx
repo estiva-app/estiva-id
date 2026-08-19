@@ -20,8 +20,11 @@
  * status, how far enrolment got, and admission. A person is only "fine" when all
  * three agree, and this screen refuses to imply that when they do not.
  */
+
+import { IconArrowLeft } from '@tabler/icons-react'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { AuditLog } from './AuditLog'
+import { Select } from './Select'
 import {
   type AdmissionStatus,
   type AdmissionUnknownReason,
@@ -369,19 +372,21 @@ function InvitePerson() {
                 later instead.
               </p>
             </label>
-            <label>
+            <div className="field">
               <span className="label-text">Role</span>
-              <select
+              <Select
                 value={role}
-                onChange={(event) => setRole(event.target.value as 'admin' | 'member')}
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
-              </select>
+                ariaLabel="Role"
+                onChange={(next) => setRole(next as 'admin' | 'member')}
+                options={[
+                  { value: 'member', label: 'Member' },
+                  { value: 'admin', label: 'Admin' },
+                ]}
+              />
               <p className="hint">
                 An admin can see this screen, offboard people and invite others.
               </p>
-            </label>
+            </div>
             <div className="row">
               <button type="submit" disabled={busy || email.trim() === ''}>
                 {busy ? 'Creating…' : 'Create an invite link'}
@@ -588,7 +593,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
   return (
     <>
       <button type="button" className="link" onClick={onBack}>
-        ← Back to everyone
+        <IconArrowLeft size={16} stroke={1.5} />
+        Back to everyone
       </button>
 
       <section className="card" style={{ marginTop: '1rem' }}>

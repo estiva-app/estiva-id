@@ -8,33 +8,162 @@
  * ones sit on a plain recessed card that says so.
  */
 
-:root {
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-raised: #1e222b;
-  --border: #2a2f3a;
-  --text: #e6e8ec;
-  --text-dim: #9aa2b1;
-  --accent: #7aa2f7;
-  --published: #7ee787;
-  --danger: #f7768e;
-  --warn: #e0af68;
-  --radius: 10px;
-}
+/*
+ * Geist, the same way Peek loads it. 400/500/600 are the only weights Geist
+ * ships — 700 renders as synthetic bold, so nothing here asks for it.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap");
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f7f9;
-    --surface: #ffffff;
-    --surface-raised: #f0f2f5;
-    --border: #d8dce3;
-    --text: #1a1d23;
-    --text-dim: #5c6472;
-    --accent: #2f5fd0;
-    --published: #1a7f37;
-    --danger: #c9344a;
-    --warn: #9a6700;
-  }
+/*
+ * Peek's light palette and type scale, adopted wholesale.
+ *
+ * Estiva ID is the first screen anyone sees of Estiva, so it should not be the
+ * one that looks like a different product. The values below are copied from
+ * Peek's `:root` in `src/index.css`; the short names underneath are Estiva ID's
+ * own, kept as aliases so every rule in this file keeps working while the
+ * palette changes underneath it.
+ *
+ * Light is unconditional now. This used to default to dark and switch on
+ * `prefers-color-scheme`; the old values are preserved at the bottom of this
+ * block rather than deleted.
+ */
+:root {
+  /* bg */
+  --bg-base: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #fafafa;
+  --bg-inset: #f4f4f5;
+  --bg-hover: #e9e9eb;
+  --bg-selected: #e4e4e7;
+  --bg-active: #d4d4d8;
+  --bg-disabled: #f4f4f5;
+  /* text */
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+  --text-disabled: #d4d4d8;
+  --text-inverse: #fafafa;
+  /* border */
+  --border-subtle: #f4f4f5;
+  --border-default: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-focus: #8b5cf6;
+  /* accent */
+  --accent-primary: #8b5cf6;
+  --accent-hover: #7c3aed;
+  --accent-muted: #ede9fe;
+  /* semantic */
+  --success-default: #0ea06f;
+  --warning-default: #f59e0b;
+  --error-default: #ef4444;
+  --info-default: #3b82f6;
+  --accent-muted: #ede9fe;
+  --success-muted: #d1fae5;
+  --warning-muted: #fef3c7;
+  --error-muted: #fee2e2;
+  --info-muted: #dbeafe;
+  /*
+   * Readable text on a muted fill.
+   *
+   * Peek states each semantic hue twice: a 500 for solid marks and a 100 for
+   * fills. Putting the 500 on the 100 is legible on a white card and not much
+   * else - and these screens sit on `--bg-base` grey as often as on white. This
+   * is the 700 of the same ramp, for text and outlines on a muted fill.
+   */
+  --success-strong: #064e3b;
+  --warning-strong: #78350f;
+  --error-strong: #7f1d1d;
+  /*
+   * Destructive controls and error copy sit a step lighter than the 900.
+   *
+   * The 900 is right as ink inside a small pale chip, where the label is two
+   * words. On a button you are being asked to think about, and on the line
+   * explaining what went wrong, it reads as near-black and loses the fact that
+   * it is red at all. The 700 stays unmistakably red and still clears 5.3:1 on
+   * the same fill.
+   */
+  --error-text: #b91c1c;
+  --info-strong: #1e3a8a;
+  --accent-strong: #4c1d95;
+
+  /*
+   * A chip is a pale fill, a dark ink, and a hairline - not a colour block.
+   *
+   * The fill is the 100 of the ramp, which is quiet enough to sit ten-to-a-page
+   * without the list turning into bunting. Saturating it to the 200 to make the
+   * pill findable was louder than the content it was labelling.
+   *
+   * Shape comes from the edge instead: the 200 as a 1px hairline reads at
+   * 1.13-1.32:1 against either background while the fill stays pale, and the
+   * 900 ink holds text at 8.2-9.2:1. Colour carries the meaning; the hairline
+   * carries the shape; neither has to shout.
+   */
+  /* Picked by eye, not stepped off a ramp: hsl(165 45% 90%). */
+  --success-fill: #daf1eb;
+  /* hsl(43 68% 87%). */
+  --warning-fill: #f4e8c7;
+  --error-fill: #fee2e2;
+  --info-fill: #dbeafe;
+  --accent-fill: #ede9fe;
+
+  /*
+   * Derived, not picked: the same hue and saturation as its fill, 15 points
+   * darker - which is the move the yellow pair below makes. Worth a look
+   * beside the yellow to check it holds.
+   */
+  --success-edge: #a3dcce;
+  /* hsl(48 89% 72%). */
+  --warning-edge: #f7de78;
+  --error-edge: #fecaca;
+  --info-edge: #bfdbfe;
+  --accent-edge: #ddd6fe;
+  /* radii, from Peek's scale */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Peek's elevation scale, for the one surface here that floats. */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  /*
+   * Focus: a 1px accent edge and a soft halo, not a 2px outline.
+   *
+   * The same shape Peek uses (`--focus-ring` in its Signal block, a 12% ring) -
+   * the indicator is the border changing colour, and the halo just makes it
+   * findable. A hard 2px outline on a 1px-bordered field reads as an error
+   * state, which is a lot of noise for "you are here".
+   */
+  --focus-ring: 0 0 0 3px rgba(139, 92, 246, 0.15);
+
+  --font-sans: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+
+  /* ── Estiva ID's names, mapped onto Peek's ── */
+  --bg: var(--bg-base);
+  --surface: var(--bg-surface);
+  --surface-raised: var(--bg-elevated);
+  --border: var(--border-default);
+  --text: var(--text-primary);
+  --text-dim: var(--text-secondary);
+  --accent: var(--accent-primary);
+  --published: var(--success-default);
+  --danger: var(--error-default);
+  --warn: var(--warning-default);
+  --radius: var(--radius-lg);
+
+  /*
+   * The previous palette, kept rather than dropped. Estiva ID defaulted to
+   * dark and only went light when the OS did:
+   *   dark  --bg #0f1115  --surface #171a21  --surface-raised #1e222b
+   *         --border #2a2f3a  --text #e6e8ec  --text-dim #9aa2b1
+   *         --accent #7aa2f7  --published #7ee787  --danger #f7768e  --warn #e0af68
+   *   light --bg #f6f7f9  --surface #ffffff  --surface-raised #f0f2f5
+   *         --border #d8dce3  --text #1a1d23  --text-dim #5c6472
+   *         --accent #2f5fd0  --published #1a7f37  --danger #c9344a  --warn #9a6700
+   */
 }
 
 * {
@@ -45,7 +174,11 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px / 1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Peek `body-1`: 16px / 150% / 400. */
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 150%;
+  font-weight: 400;
 }
 
 .page {
@@ -63,13 +196,30 @@ header.page-head {
   flex-wrap: wrap;
 }
 
+/* Peek `h1`. */
 h1 {
-  font-size: 1.5rem;
+  font-size: 26px;
+  line-height: 115%;
+  letter-spacing: -0.02em;
+  /*
+   * Stated rather than inherited from the browser's default `bold`.
+   *
+   * 700 is exactly what the UA gave us, so nothing here changes — but leaving
+   * it implicit meant the heading rendered at 400 anywhere a CSS reset had
+   * been loaded first, which is what happens in the shared Storybook (Tailwind
+   * Preflight sets `h1-h6 { font-weight: inherit }`). A value the design
+   * depends on belongs in the stylesheet.
+   */
+  font-weight: 600;
   margin: 0;
 }
 
+/* Card titles take Peek `h4` - the step it uses for headings inside a surface. */
 h2 {
-  font-size: 1.05rem;
+  font-size: 16px;
+  line-height: 150%;
+  letter-spacing: -0.01em;
+  font-weight: 600;
   margin: 0;
 }
 
@@ -100,25 +250,55 @@ h2 {
 }
 
 .badge {
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  border: 1px solid currentcolor;
+  /*
+   * Peek's `Chip`: a filled pill, not an outlined one.
+   *
+   * Peek states a chip with a muted fill and saturated text, no border, and no
+   * uppercasing. The uppercase and letter-spacing this app used are dropped
+   * rather than kept as a local flourish - two chip styles across one suite is
+   * the thing being fixed.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-height: 20px;
+  min-width: 16px;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 110%;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
+/* Chip `success`. */
 .badge.published {
-  color: var(--published);
+  background: var(--success-fill);
+  box-shadow: inset 0 0 0 1px var(--success-edge);
+  color: var(--success-strong);
 }
 
+/* Chip `neutral`. */
 .badge.private {
-  color: var(--text-dim);
+  /*
+   * Outlined rather than filled, and the only chip here that is.
+   *
+   * These lists sit on `--bg-base`, which is `--bg-inset` - so a neutral chip
+   * had no fill to be seen by. Going darker until it showed made neutral the
+   * heaviest thing in a row of semantic chips, which is backwards. A quiet fill
+   * with an edge stays the quietest chip and still reads on white or grey.
+   */
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-primary);
 }
 
 .card-note {
-  color: var(--text-dim);
-  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 140%;
+  font-weight: 400;
   margin: 0 0 1.1rem;
 }
 
@@ -129,69 +309,166 @@ label {
 
 .label-text {
   display: block;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  margin-bottom: 0.3rem;
+  /* Peek's `Field` label: `input-label`, and primary rather than dimmed. */
+  font-size: 12px;
+  line-height: 115%;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 8px;
 }
 
 input[type="text"],
 input[type="url"] {
+  /* Matches Peek's `TextInput` primitive, which replaces this later. */
   width: 100%;
-  padding: 0.55rem 0.7rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
+  padding: 8px 12px;
+  background: var(--bg-inset);
+  /*
+   * `--border-default` disappeared: the field's own fill is `--bg-inset`, which
+   * is also the page background, so on a grey page the control had neither an
+   * edge nor a fill to distinguish it. `--border-strong` is the one that reads
+   * on white and on grey.
+   */
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 400;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type="text"]::placeholder,
+input[type="url"]::placeholder {
+  color: var(--text-muted);
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus {
+  /* Resting is already `--border-strong`, so focus has to go further. */
+  border-color: var(--border-focus);
+  box-shadow: var(--focus-ring);
 }
 
 input:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+button:focus-visible,
+select:focus-visible,
+.select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--focus-ring);
 }
 
 .hint {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  margin-top: 0.3rem;
+  font-size: 12px;
+  line-height: 120%;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-top: 6px;
 }
 
 .hint.error {
-  color: var(--danger);
+  color: var(--error-text);
 }
 
+/*
+ * Geometry copied from Peek's `Button` primitive, which is meant to replace
+ * this once the components are shared: 32px tall, `btn-default` type
+ * (14px / 14px / 500), 6px radius, 8px of horizontal padding, 4px gap.
+ *
+ * The default here is Peek's `outlined` variant rather than `muted`, because
+ * these buttons sit on cards where a borderless control reads as text.
+ */
 button {
-  font: inherit;
-  padding: 0.5rem 0.9rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
-  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 14px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+/*
+ * The primary action is a dark neutral, not Peek's purple.
+ *
+ * Peek uses its accent for `primary`, but the accent is Peek's brand and this
+ * is the identity service every app redirects into. A dark fill built from the
+ * existing text tokens reads as unmistakably primary without claiming one app's
+ * colour. Hover lifts to `--text-secondary`, the next step up the same ramp.
+ */
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: var(--text-inverse);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--text-secondary);
+  border-color: var(--text-secondary);
 }
 
 button.danger {
-  color: var(--danger);
+  color: var(--error-text);
+  border-color: var(--border-strong);
 }
 
+/*
+ * Hover tints rather than floods.
+ *
+ * A solid red fill on hover reads as "this has happened" a moment before it
+ * has, on a control whose whole job is to be considered. The muted fill says
+ * the same thing without the alarm.
+ */
+button.danger:hover:not(:disabled) {
+  background: var(--error-fill);
+  border-color: var(--error-edge);
+  color: var(--error-text);
+}
+
+/* Peek states this rather than fading: a disabled control is its own colour. */
 button:disabled {
-  opacity: 0.5;
+  background: var(--bg-disabled);
+  border-color: var(--border-default);
+  /* `--text-disabled` on `--bg-disabled` is two greys apart; unavailable still
+     has to be legible. */
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
+/*
+ * A quiet button, not a link.
+ *
+ * These are all navigation and actions - Sign out, Admin, back - and an
+ * underlined accent-coloured control reads as a hyperlink into a document
+ * rather than a thing that does something. Peek's `Button` has exactly one
+ * variant for this: `muted`, which is borderless until you hover it.
+ */
 button.link {
+  border-color: transparent;
   background: none;
-  border: none;
-  color: var(--accent);
-  padding: 0;
-  text-decoration: underline;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+button.link:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
 }
 
 .row {
@@ -202,8 +479,16 @@ button.link {
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  /*
+   * Mono here marks a value you would copy - a pubkey, a client id. At the same
+   * weight and colour as the prose around it the distinction was carried by
+   * letterforms alone, which is too quiet at 12px.
+   */
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 120%;
+  font-weight: 500;
+  color: var(--text-primary);
   word-break: break-all;
 }
 
@@ -212,15 +497,38 @@ dl.facts {
   display: grid;
   grid-template-columns: minmax(6rem, auto) 1fr;
   gap: 0.5rem 1rem;
+  /*
+   * A 12px label beside a 14px value has two different centres, so a column of
+   * them reads as jumbled. Anchor each pair on its baseline instead.
+   */
+  align-items: baseline;
 }
 
 dl.facts dt {
-  color: var(--text-dim);
-  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 120%;
+  font-weight: 400;
 }
 
 dl.facts dd {
   margin: 0;
+  /* Peek `body-2`, so a value does not tower over its label. */
+  font-size: 14px;
+  line-height: 140%;
+}
+
+/*
+ * A mono value keeps `.mono`'s own size, which `dl.facts dd` was outweighing on
+ * specificity alone - one class and two elements beats one class.
+ *
+ * It matters here more than it looks: a 64-character public key at 14px wraps
+ * onto a second line, and a key broken across two lines is harder to compare by
+ * eye and harder to select cleanly. At 12px it fits on one.
+ */
+dl.facts dd.mono {
+  font-size: 12px;
+  line-height: 120%;
 }
 
 ul.credentials {
@@ -229,43 +537,85 @@ ul.credentials {
   padding: 0;
 }
 
+/*
+ * Rows are Peek `body-2`, like every other list in the suite.
+ *
+ * Both of these lists inherited `body-1` at 16px, so "You signed in" in the
+ * activity card and a passkey's name sat a size above the same sentence
+ * rendered anywhere else.
+ */
+ul.credentials li,
+ul.people li {
+  font-size: 14px;
+  line-height: 140%;
+}
+
 ul.credentials li {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.8rem 0;
-  border-top: 1px solid var(--border);
+  /*
+   * No rule between rows: Peek's `PersonRow` is a rounded row that fills on
+   * hover, and `Divider` is reserved for menus and card sections. A border here
+   * would be a separator pattern this suite does not otherwise use.
+   */
   flex-wrap: wrap;
-}
-
-ul.credentials li:first-child {
-  border-top: none;
+  /* Peek `PersonRow`: rounded row, 8px of side padding, fills on hover. */
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: var(--radius-lg);
+  transition: background-color 0.15s;
 }
 
 .cred-meta {
-  color: var(--text-dim);
-  font-size: 0.8rem;
+  /* `--text-muted` is for placeholders; this is content, and it was unreadable. */
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 120%;
 }
 
 .notice {
-  border-radius: 6px;
-  padding: 0.6rem 0.8rem;
+  /*
+   * Peek has no inline banner primitive - `Toast` is a floating notification -
+   * so this follows the semantic pattern `Chip` sets instead: a muted fill with
+   * saturated text and no border. Radius matches Peek's containers (`rounded-lg`).
+   */
+  /*
+   * A banner is bigger than a chip and carries the only copy explaining what
+   * just happened, so the chip treatment - a 100 fill and a 500 text - was both
+   * too faint to find and too pale to read. It keeps the muted fill, takes the
+   * 700 for text, and gets an outline in the 500 so it still has an edge when
+   * it sits on `--bg-base` rather than on a white card.
+   */
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
   margin-bottom: 1rem;
-  font-size: 0.9rem;
-  border: 1px solid currentcolor;
+  font-size: 14px;
+  line-height: 140%;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
 }
 
 .notice.ok {
-  color: var(--published);
+  background: var(--success-fill);
+  border-color: var(--success-edge);
+  color: var(--success-strong);
 }
 
 .notice.warn {
-  color: var(--warn);
+  background: var(--warning-fill);
+  border-color: var(--warning-edge);
+  color: var(--warning-strong);
 }
 
 .notice.error {
-  color: var(--danger);
+  background: var(--error-fill);
+  border-color: var(--error-edge);
+  color: var(--error-strong);
 }
 
 .centered {
@@ -303,12 +653,18 @@ ul.people li {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.85rem 0;
-  border-top: 1px solid var(--border);
+  /*
+   * No rule between rows: Peek's `PersonRow` is a rounded row that fills on
+   * hover, and `Divider` is reserved for menus and card sections. A border here
+   * would be a separator pattern this suite does not otherwise use.
+   */
   flex-wrap: wrap;
-}
-
-ul.people li:first-child {
-  border-top: none;
+  /* Peek `PersonRow`: rounded row, 8px of side padding, fills on hover. */
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: var(--radius-lg);
+  transition: background-color 0.15s;
 }
 
 .person-main {
@@ -331,10 +687,17 @@ ul.people li:first-child {
 }
 
 .chip {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid currentcolor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-height: 20px;
+  min-width: 16px;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 110%;
+  font-weight: 500;
   white-space: nowrap;
   /*
    * No text-transform. The label is read as a sentence fragment ("Never signed
@@ -342,29 +705,51 @@ ul.people li:first-child {
    */
 }
 
+/* The five Chip types this app needs, by Peek's names. */
 .chip.ok {
-  color: var(--published);
+  background: var(--success-fill);
+  box-shadow: inset 0 0 0 1px var(--success-edge);
+  color: var(--success-strong);
 }
 
 .chip.warn {
-  color: var(--warn);
+  background: var(--warning-fill);
+  box-shadow: inset 0 0 0 1px var(--warning-edge);
+  color: var(--warning-strong);
 }
 
 .chip.danger {
-  color: var(--danger);
+  background: var(--error-fill);
+  box-shadow: inset 0 0 0 1px var(--error-edge);
+  color: var(--error-strong);
 }
 
 .chip.pending {
-  color: var(--accent);
+  background: var(--info-fill);
+  box-shadow: inset 0 0 0 1px var(--info-edge);
+  color: var(--info-strong);
 }
 
-/* "Not known" is not a warning. It is the absence of one. */
+/* "Not known" is not a warning. It is the absence of one - Chip `neutral`. */
 .chip.muted {
-  color: var(--text-dim);
+  /*
+   * Outlined rather than filled, and the only chip here that is.
+   *
+   * These lists sit on `--bg-base`, which is `--bg-inset` - so a neutral chip
+   * had no fill to be seen by. Going darker until it showed made neutral the
+   * heaviest thing in a row of semantic chips, which is backwards. A quiet fill
+   * with an edge stays the quietest chip and still reads on white or grey.
+   */
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-primary);
 }
 
+/* Chip `brand`. */
 .badge.role {
-  color: var(--accent);
+  background: var(--accent-fill);
+  box-shadow: inset 0 0 0 1px var(--accent-edge);
+  color: var(--accent-strong);
 }
 
 /* The avatar picker (PEEK-32). */
@@ -377,24 +762,39 @@ ul.people li:first-child {
   margin-top: 0.3rem;
 }
 
+/*
+ * Peek's `Avatar` shape: a 4px rounded square, not a circle.
+ *
+ * This is the control where you choose the picture Peek renders, so the preview
+ * has to show the crop Peek will actually apply - a face that sits well in a
+ * circle can lose its edges in a square, and finding that out in the other app
+ * is too late. `--bg-inset` behind it is what Peek puts there too.
+ */
 .avatar-preview {
   width: 3rem;
   height: 3rem;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   object-fit: cover;
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  background: var(--bg-inset);
   flex: none;
 }
 
-/* A dashed ring, so "nothing here yet" does not read as a broken image. */
+/*
+ * A dashed ring, so "nothing here yet" does not read as a broken image.
+ *
+ * Kept rather than taking Peek's filled silhouette: this is a picker, and a
+ * dashed outline asks for something in a way a rendered placeholder does not.
+ */
 .avatar-preview.is-empty {
   border-style: dashed;
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--text-primary);
   background: var(--surface-raised);
   padding: 0.05rem 0.3rem;
   border-radius: 4px;
@@ -415,11 +815,17 @@ ul.audit {
 
 ul.audit li {
   padding: 0.55rem 0;
-  border-top: 1px solid var(--border);
-}
-
-ul.audit li:first-child {
-  border-top: none;
+  /*
+   * No rule between rows: Peek's `PersonRow` is a rounded row that fills on
+   * hover, and `Divider` is reserved for menus and card sections. A border here
+   * would be a separator pattern this suite does not otherwise use.
+   */
+  /* Peek `PersonRow`: rounded row, 8px of side padding, fills on hover. */
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: var(--radius-lg);
+  transition: background-color 0.15s;
 }
 
 .audit-line {
@@ -427,21 +833,145 @@ ul.audit li:first-child {
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+  /*
+   * Peek `body-2`, like every other list row in the suite.
+   *
+   * These lines inherited `body-1` at 16px, which made a log of short factual
+   * entries read a size larger than the people list saying comparable things.
+   */
+  font-size: 14px;
+  line-height: 140%;
 }
 
 /* The two names in the sentence, so a scan lands on people rather than verbs. */
+/*
+ * Peek `body-2-strong` - 500, not 600.
+ *
+ * 600 is the weight Peek gives headings; a name emphasised inside a sentence is
+ * the `body-2-strong` step, which is what the people list already uses.
+ */
 .audit-actor,
 .audit-subject {
-  font-weight: 600;
+  font-weight: 500;
 }
 
-select {
-  font: inherit;
-  padding: 0.45rem 0.6rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
+/*
+ * The dropdown trigger, and the menu it opens (see `Select.tsx`).
+ *
+ * The trigger is the same control as `TextInput` - it sits beside those inputs
+ * and should read as one of them. The menu is Peek's: `--bg-elevated` on a
+ * `--border-default` outline, `--shadow-lg`, 4px of padding, and 36px rows that
+ * fill on hover.
+ *
+ * `select` keeps the same trigger styling for any native one left in place.
+ */
+select,
+.select-trigger {
+  padding: 8px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 400;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 12rem;
+  height: auto;
+  cursor: pointer;
+  text-align: left;
+}
+
+.select-trigger:hover:not(:disabled) {
+  background: var(--bg-inset);
+  border-color: var(--border-strong);
+}
+
+select:focus,
+.select-trigger[aria-expanded="true"] {
+  border-color: var(--border-focus);
+  box-shadow: var(--focus-ring);
+}
+
+.select-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.menu {
+  position: fixed;
+  z-index: 50;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 4px;
+  /*
+   * White, not `--bg-elevated`.
+   *
+   * Peek floats its menus over a dark canvas, where `--bg-elevated` reads as
+   * lifted. Here the page is already light grey and the cards are white, so the
+   * same token made the menu look recessed instead of raised - the shadow was
+   * doing all the work. White puts it above everything under it.
+   */
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: nowrap;
+  transition: background-color 0.15s;
+}
+
+/*
+ * One highlight, driven by the keyboard.
+ *
+ * `is-active` is wherever the arrows are, and the pointer sets it too on enter -
+ * so a hover highlight and a keyboard highlight can never both be lit, which is
+ * the usual way a menu ends up looking like it has two cursors.
+ */
+.menu-item.is-active {
+  background: var(--bg-hover);
+}
+
+.menu-item.is-selected {
+  font-weight: 500;
+}
+
+.menu-check {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 /*
@@ -456,8 +986,49 @@ code.command {
   padding: 0.5rem 0.7rem;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.8rem;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 120%;
   overflow-x: auto;
   white-space: nowrap;
+}
+
+/*
+ * Hover, the way Peek reveals a row.
+ *
+ * Not on the audit log: those entries are a record to read, not a list of
+ * things to act on, and a hover state suggests otherwise.
+ */
+/*
+ * Only the people list. A row highlights because it can be opened; the passkey
+ * list is a list you read, and its actions are the buttons inside it.
+ */
+ul.people li:hover {
+  background: var(--bg-hover);
+}
+
+/*
+ * Row titles take Peek `body-2-strong` - 14px / 140% / 500.
+ *
+ * Peek names an entity in a row at 14/500 (`ConversationCard`, `ConversationHeader`,
+ * `ContainerHeader`); `PersonRow` is 14px too. These lists inherited `body-1` at
+ * 16px, which sat heavily against their 12px meta line and read as a heading
+ * rather than a row.
+ *
+ * Selected structurally because the name is an unclassed element - restyling
+ * beats reaching into the component to add a hook for it.
+ */
+ul.credentials li > div > div:not(.cred-meta),
+.person-name {
+  font-size: 14px;
+  line-height: 140%;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Inline icons align to the text they interrupt, not to the line box. */
+.audit-arrow {
+  vertical-align: text-bottom;
+  margin: 0 2px;
+  color: var(--text-secondary);
 }
