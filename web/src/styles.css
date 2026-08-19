@@ -12,7 +12,7 @@
  * Geist, the same way Peek loads it. 400/500/600 are the only weights Geist
  * ships — 700 renders as synthetic bold, so nothing here asks for it.
  */
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap");
 
 /*
  * Peek's light palette and type scale, adopted wholesale.
@@ -29,39 +29,39 @@
  */
 :root {
   /* bg */
-  --bg-base:     #F4F4F5;
-  --bg-surface:  #FFFFFF;
-  --bg-elevated: #FAFAFA;
-  --bg-inset:    #F4F4F5;
-  --bg-hover:    #E9E9EB;
-  --bg-selected: #E4E4E7;
-  --bg-active:   #D4D4D8;
-  --bg-disabled: #F4F4F5;
+  --bg-base: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #fafafa;
+  --bg-inset: #f4f4f5;
+  --bg-hover: #e9e9eb;
+  --bg-selected: #e4e4e7;
+  --bg-active: #d4d4d8;
+  --bg-disabled: #f4f4f5;
   /* text */
-  --text-primary:   #18181B;
-  --text-secondary: #52525B;
-  --text-muted:     #A1A1AA;
-  --text-disabled:  #D4D4D8;
-  --text-inverse:   #FAFAFA;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+  --text-disabled: #d4d4d8;
+  --text-inverse: #fafafa;
   /* border */
-  --border-subtle:  #F4F4F5;
-  --border-default: #E4E4E7;
-  --border-strong:  #D4D4D8;
-  --border-focus:   #8B5CF6;
+  --border-subtle: #f4f4f5;
+  --border-default: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-focus: #8b5cf6;
   /* accent */
-  --accent-primary: #8B5CF6;
-  --accent-hover:   #7C3AED;
-  --accent-muted:   #EDE9FE;
+  --accent-primary: #8b5cf6;
+  --accent-hover: #7c3aed;
+  --accent-muted: #ede9fe;
   /* semantic */
-  --success-default: #0EA06F;
-  --warning-default: #F59E0B;
-  --error-default:   #EF4444;
-  --info-default:    #3B82F6;
-  --accent-muted:    #EDE9FE;
-  --success-muted:   #D1FAE5;
-  --warning-muted:   #FEF3C7;
-  --error-muted:     #FEE2E2;
-  --info-muted:      #DBEAFE;
+  --success-default: #0ea06f;
+  --warning-default: #f59e0b;
+  --error-default: #ef4444;
+  --info-default: #3b82f6;
+  --accent-muted: #ede9fe;
+  --success-muted: #d1fae5;
+  --warning-muted: #fef3c7;
+  --error-muted: #fee2e2;
+  --info-muted: #dbeafe;
   /*
    * Readable text on a muted fill.
    *
@@ -70,9 +70,9 @@
    * else - and these screens sit on `--bg-base` grey as often as on white. This
    * is the 700 of the same ramp, for text and outlines on a muted fill.
    */
-  --success-strong:  #064E3B;
-  --warning-strong:  #78350F;
-  --error-strong:    #7F1D1D;
+  --success-strong: #064e3b;
+  --warning-strong: #78350f;
+  --error-strong: #7f1d1d;
   /*
    * Destructive controls and error copy sit a step lighter than the 900.
    *
@@ -82,9 +82,9 @@
    * it is red at all. The 700 stays unmistakably red and still clears 5.3:1 on
    * the same fill.
    */
-  --error-text:      #B91C1C;
-  --info-strong:     #1E3A8A;
-  --accent-strong:   #4C1D95;
+  --error-text: #b91c1c;
+  --info-strong: #1e3a8a;
+  --accent-strong: #4c1d95;
 
   /*
    * A chip is a pale fill, a dark ink, and a hairline - not a colour block.
@@ -99,24 +99,24 @@
    * carries the shape; neither has to shout.
    */
   /* Picked by eye, not stepped off a ramp: hsl(165 45% 90%). */
-  --success-fill:    #DAF1EB;
+  --success-fill: #daf1eb;
   /* hsl(43 68% 87%). */
-  --warning-fill:    #F4E8C7;
-  --error-fill:      #FEE2E2;
-  --info-fill:       #DBEAFE;
-  --accent-fill:     #EDE9FE;
+  --warning-fill: #f4e8c7;
+  --error-fill: #fee2e2;
+  --info-fill: #dbeafe;
+  --accent-fill: #ede9fe;
 
   /*
    * Derived, not picked: the same hue and saturation as its fill, 15 points
    * darker - which is the move the yellow pair below makes. Worth a look
    * beside the yellow to check it holds.
    */
-  --success-edge:    #A3DCCE;
+  --success-edge: #a3dcce;
   /* hsl(48 89% 72%). */
-  --warning-edge:    #F7DE78;
-  --error-edge:      #FECACA;
-  --info-edge:       #BFDBFE;
-  --accent-edge:     #DDD6FE;
+  --warning-edge: #f7de78;
+  --error-edge: #fecaca;
+  --info-edge: #bfdbfe;
+  --accent-edge: #ddd6fe;
   /* radii, from Peek's scale */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -138,8 +138,8 @@
    */
   --focus-ring: 0 0 0 3px rgba(139, 92, 246, 0.15);
 
-  --font-sans: 'Geist', system-ui, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-sans: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
   /* ── Estiva ID's names, mapped onto Peek's ── */
   --bg: var(--bg-base);
@@ -570,7 +570,6 @@ ul.credentials li {
   transition: background-color 0.15s;
 }
 
-
 .cred-meta {
   /* `--text-muted` is for placeholders; this is content, and it was unreadable. */
   color: var(--text-secondary);
@@ -667,7 +666,6 @@ ul.people li {
   border-radius: var(--radius-lg);
   transition: background-color 0.15s;
 }
-
 
 .person-main {
   min-width: 12rem;
@@ -830,7 +828,6 @@ ul.audit li {
   transition: background-color 0.15s;
 }
 
-
 .audit-line {
   display: flex;
   align-items: center;
@@ -900,7 +897,7 @@ select,
 }
 
 select:focus,
-.select-trigger[aria-expanded='true'] {
+.select-trigger[aria-expanded="true"] {
   border-color: var(--border-focus);
   box-shadow: var(--focus-ring);
 }
