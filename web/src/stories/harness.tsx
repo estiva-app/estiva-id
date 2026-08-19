@@ -33,15 +33,13 @@ const isEnvelope = (a: ApiAnswer): a is { status: number; body: unknown } =>
 
 /** Scope the account UI's CSS to the stories that are actually its own. */
 const withStyles: Decorator = (Story) => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `styles` is a module import and so looks constant, but Vite replaces the module when styles.css changes — depending on it is what re-injects the stylesheet on hot reload, which is the whole workflow here.
   useEffect(() => {
     const tag = document.createElement('style')
     tag.dataset.estivaId = 'account-ui'
     tag.textContent = styles
     document.head.append(tag)
     return () => tag.remove()
-    // Depends on `styles` so editing styles.css re-injects it through Vite's
-    // hot reload. That is the whole workflow: this file is the one the real app
-    // serves, so a change made while looking at a story is a change to the app.
   }, [styles])
   return <Story />
 }

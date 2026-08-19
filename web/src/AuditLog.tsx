@@ -18,10 +18,11 @@
  * job — an app asking for something it may not have — and a log that shows only
  * successes cannot distinguish "nothing happened" from "everything was blocked".
  */
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, type AuditEntry, listAudit } from './api'
+
 import { IconArrowRight } from '@tabler/icons-react'
+import { useCallback, useEffect, useState } from 'react'
 import { Select } from './Select'
+import { ApiError, type AuditEntry, listAudit } from './api'
 
 const formatWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
@@ -135,17 +136,18 @@ export function AuditLog({ person, compact = false }: Props) {
     <>
       {!compact && (
         <div className="row" style={{ marginBottom: '1rem' }}>
-          <label style={{ margin: 0 }}>
+          <div className="field" style={{ margin: 0 }}>
             <span className="label-text">Action</span>
             <Select
               value={action}
+              ariaLabel="Action"
               onChange={setAction}
               options={[
                 { value: '', label: 'Everything' },
                 ...state.actions.map((name) => ({ value: name, label: PHRASE[name] ?? name })),
               ]}
             />
-          </label>
+          </div>
         </div>
       )}
 

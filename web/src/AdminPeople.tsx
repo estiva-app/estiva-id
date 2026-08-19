@@ -20,8 +20,11 @@
  * status, how far enrolment got, and admission. A person is only "fine" when all
  * three agree, and this screen refuses to imply that when they do not.
  */
+
+import { IconArrowLeft } from '@tabler/icons-react'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { AuditLog } from './AuditLog'
+import { Select } from './Select'
 import {
   type AdmissionStatus,
   type AdmissionUnknownReason,
@@ -43,8 +46,6 @@ import {
   offboardPerson,
   reinstatePerson,
 } from './api'
-import { IconArrowLeft } from '@tabler/icons-react'
-import { Select } from './Select'
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
@@ -371,10 +372,11 @@ function InvitePerson() {
                 later instead.
               </p>
             </label>
-            <label>
+            <div className="field">
               <span className="label-text">Role</span>
               <Select
                 value={role}
+                ariaLabel="Role"
                 onChange={(next) => setRole(next as 'admin' | 'member')}
                 options={[
                   { value: 'member', label: 'Member' },
@@ -384,7 +386,7 @@ function InvitePerson() {
               <p className="hint">
                 An admin can see this screen, offboard people and invite others.
               </p>
-            </label>
+            </div>
             <div className="row">
               <button type="submit" disabled={busy || email.trim() === ''}>
                 {busy ? 'Creating…' : 'Create an invite link'}
