@@ -188,6 +188,105 @@ describe('signing as a role, with no person in the flow', () => {
   })
 })
 
+/**
+ * PEEK-133: a bot that may sign kind:27235 and still cannot use it.
+ *
+ * `issueServiceCredential` wrote a hardcoded `'{}'` into `nip98_url_prefixes`,
+ * so every runtime-minted credential was refused `nip98_url_not_allowed` for
+ * every destination — and 27235 is the only kind a bot needs to read the relay
+ * bridge at all, so this was the difference between a working agent and one
+ * that cannot see anything.
+ *
+ * Seeded browser apps never hit it: `db/seed.ts` hands them the deployment's
+ * own prefixes. Only credentials minted after boot were affected, which is why
+ * a full green suite said nothing about it.
+ *
+ * The test environment allows `http://relay.test/` (src/test/setup.ts).
+ */
+describe('minting NIP-98 for the relay bridge', () => {
+  const httpAuth = (url: string) => ({
+    kind: 27235,
+    tags: [
+      ['u', url],
+      ['method', 'POST'],
+    ],
+    content: '',
+  })
+
+  const sign = (token: string, event: unknown) =>
+    app.request('/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ event }),
+    })
+
+  const tokenValue = async (clientId: string, secret: string) =>
+    ((await (await tokenFor(clientId, secret)).json()) as { access_token: string }).access_token
+
+  async function relayReader(nip98UrlPrefixes: string[]) {
+    const bot = await createRoleIdentity({ displayName: 'Relay Reader' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'relay-reader',
+      name: 'Relay Reader',
+      allowedKinds: [27235],
+      nip98UrlPrefixes,
+    })
+    return { bot, credential, token: await tokenValue(credential.clientId, credential.secret) }
+  }
+
+  it('signs for a destination the credential was minted for', async () => {
+    const { token } = await relayReader(['http://relay.test/'])
+    expect((await sign(token, httpAuth('http://relay.test/query'))).status).toBe(200)
+  })
+
+  it('refuses when the credential carries no prefixes at all', async () => {
+    const { token } = await relayReader([])
+    const response = await sign(token, httpAuth('http://relay.test/query'))
+
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'nip98_url_not_allowed' } },
+    })
+  })
+
+  /**
+   * The ordering that must survive: an app's list narrows within the
+   * deployment's and can never widen it. Minting is not a way to grant
+   * yourself a destination the deployment has not allowed.
+   */
+  it('refuses a destination the deployment forbids, however the credential was minted', async () => {
+    const { token } = await relayReader(['https://evil.test/'])
+    const response = await sign(token, httpAuth('https://evil.test/steal'))
+
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'nip98_url_not_allowed' } },
+    })
+  })
+
+  /**
+   * The half an insert-only fix would miss. Rotation is the common case —
+   * re-issuing replaces the secret — so a conflict update that leaves
+   * `nip98_url_prefixes` alone strands a bot on whatever it was created with.
+   */
+  it('applies new prefixes when an existing credential is re-issued', async () => {
+    const { bot, credential, token: before } = await relayReader([])
+    expect((await sign(before, httpAuth('http://relay.test/query'))).status).toBe(422)
+
+    const rotated = await issueServiceCredential({
+      userId: bot.id,
+      clientId: credential.clientId,
+      name: 'Relay Reader',
+      allowedKinds: [27235],
+      nip98UrlPrefixes: ['http://relay.test/'],
+    })
+
+    const token = await tokenValue(rotated.clientId, rotated.secret)
+    expect((await sign(token, httpAuth('http://relay.test/query'))).status).toBe(200)
+  })
+})
+
 describe('what a credential may not be issued for', () => {
   /**
    * The dangerous one. A credential that signs as a *person* is a way to act as

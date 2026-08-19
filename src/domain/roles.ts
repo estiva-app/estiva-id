@@ -92,6 +92,18 @@ export async function issueServiceCredential(input: {
   clientId: string
   name: string
   allowedKinds: number[]
+  /**
+   * Where this credential may mint NIP-98 for, narrowing within the
+   * deployment's own allowlist (PEEK-133).
+   *
+   * Seeded apps get the deployment's prefixes from `db/seed.ts`; a credential
+   * minted at runtime had no way to receive any, so every service identity was
+   * refused `nip98_url_not_allowed` for kind:27235 — the one kind a bot needs
+   * to read the relay bridge at all. Defaults to empty, which is the same
+   * fail-closed posture as the column, and means the caller must say where a
+   * bot is allowed to authenticate rather than inheriting it by accident.
+   */
+  nip98UrlPrefixes?: string[]
 }): Promise<IssuedServiceCredential> {
   const target = await queryOne<{ kind: string; status: string }>(
     'select kind, status from users where id = $1',
@@ -117,17 +129,28 @@ export async function issueServiceCredential(input: {
       'delete from app_credentials where acts_as_user_id = $1 and client_id <> $2',
       [input.userId, input.clientId],
     )
+    // `nip98_url_prefixes` is set on both halves deliberately. Insert alone
+    // would leave rotation — the common case, since re-issuing replaces the
+    // secret — silently keeping whatever prefixes the row was created with.
     await client.query(
       `insert into app_credentials
          (client_id, name, allowed_kinds, nip98_url_prefixes, client_secret_hash, acts_as_user_id)
-       values ($1, $2, $3, '{}', $4, $5)
+       values ($1, $2, $3, $4, $5, $6)
        on conflict (client_id) do update
          set name = excluded.name,
              allowed_kinds = excluded.allowed_kinds,
+             nip98_url_prefixes = excluded.nip98_url_prefixes,
              client_secret_hash = excluded.client_secret_hash,
              acts_as_user_id = excluded.acts_as_user_id,
              updated_at = now()`,
-      [input.clientId, input.name, input.allowedKinds, sha256(secret), input.userId],
+      [
+        input.clientId,
+        input.name,
+        input.allowedKinds,
+        input.nip98UrlPrefixes ?? [],
+        sha256(secret),
+        input.userId,
+      ],
     )
   })
 
