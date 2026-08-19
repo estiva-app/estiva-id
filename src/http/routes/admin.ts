@@ -56,6 +56,17 @@ const credentialSchema = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/, 'Lowercase letters, digits and dashes'),
   name: z.string().min(1).max(200),
   allowedKinds: z.array(z.number().int().nonnegative()).max(50),
+  /**
+   * Optional, and absent means "everything this deployment allows" rather than
+   * "nothing" (PEEK-134).
+   *
+   * Empty is the fail-closed value in the column, which is right as a default
+   * for a *row* and wrong as a default for a *form*: an admin who grants 27235
+   * and says nothing here would get a bot allowed the one kind it needs and
+   * refused every destination for it. `db/seed.ts` already resolves the same
+   * ambiguity the same way for the seeded apps.
+   */
+  nip98UrlPrefixes: z.array(z.string().min(1).max(500)).max(20).optional(),
 })
 
 export function adminRoutes(): Hono<AppEnv> {
@@ -377,12 +388,22 @@ export function adminRoutes(): Hono<AppEnv> {
     const body = credentialSchema.safeParse(await c.req.json().catch(() => null))
     if (!body.success) throw badRequest('Expected { clientId, name, allowedKinds }')
 
+    // Widening is still impossible — `evaluateSignPolicy` applies the
+    // deployment bound as well — so the worst this default can do is grant a
+    // bot every destination the deployment already permits. That is a far
+    // better failure than a credential which looks minted and cannot read.
+    const nip98UrlPrefixes =
+      body.data.nip98UrlPrefixes && body.data.nip98UrlPrefixes.length > 0
+        ? body.data.nip98UrlPrefixes
+        : [...config().SIGN_NIP98_ALLOWED_URL_PREFIXES]
+
     try {
       const credential = await issueServiceCredential({
         userId: c.req.param('id'),
         clientId: body.data.clientId,
         name: body.data.name,
         allowedKinds: body.data.allowedKinds,
+        nip98UrlPrefixes,
       })
 
       await recordAudit({
@@ -397,6 +418,10 @@ export function adminRoutes(): Hono<AppEnv> {
           subjectUserId: credential.actsAsUserId,
           clientId: credential.clientId,
           allowedKinds: body.data.allowedKinds,
+          // The resolved list, not what was asked for. Reading this back later
+          // should say what the credential can actually do, and the default
+          // above means those are not always the same thing.
+          nip98UrlPrefixes,
         },
         requestId: c.get('requestId'),
       })

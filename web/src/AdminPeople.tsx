@@ -767,6 +767,7 @@ function CredentialCard({ person }: { person: Person }) {
   const [issued, setIssued] = useState<{ clientId: string; clientSecret: string } | null>(null)
   const [clientId, setClientId] = useState('')
   const [kinds, setKinds] = useState('')
+  const [prefixes, setPrefixes] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -786,6 +787,13 @@ function CredentialCard({ person }: { person: Person }) {
             .split(',')
             .map((part) => Number(part.trim()))
             .filter((kind) => Number.isInteger(kind) && kind >= 0),
+          // Left blank on purpose means "whatever this deployment allows" —
+          // resolved by the server, so an empty box mints a working bot rather
+          // than one refused every destination.
+          nip98UrlPrefixes: prefixes
+            .split(',')
+            .map((part) => part.trim())
+            .filter((prefix) => prefix !== ''),
         }),
       )
     } catch (caught) {
@@ -852,6 +860,20 @@ function CredentialCard({ person }: { person: Person }) {
               <p className="hint">
                 Comma separated. The same per-app ceiling every other credential has — 27235 is
                 NIP-98, without which it cannot reach the relay's bridge at all.
+              </p>
+            </label>
+            <label>
+              <span className="label-text">Where it may authenticate</span>
+              <input
+                type="text"
+                value={prefixes}
+                placeholder="Everything this deployment allows"
+                onChange={(event) => setPrefixes(event.target.value)}
+              />
+              <p className="hint">
+                Comma separated URL prefixes for 27235. Leave it blank to allow every destination
+                this deployment does — narrowing here is a way to bar a bot from part of the relay,
+                and it can never widen past the deployment's own list.
               </p>
             </label>
             <div className="row">
