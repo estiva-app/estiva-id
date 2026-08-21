@@ -225,6 +225,18 @@ export const createInvite = (input: {
   role?: 'admin' | 'member'
 }) => request<CreatedInvite>('/invites', { method: 'POST', body: JSON.stringify(input) })
 
+/**
+ * Grant or withdraw admin (PEEK-163).
+ *
+ * `changed: false` means they already had that role — the server writes nothing
+ * and records nothing, so the UI should say "already" rather than "done".
+ */
+export const setPersonRole = (id: string, role: 'admin' | 'member') =>
+  request<{ from: 'admin' | 'member'; to: 'admin' | 'member'; changed: boolean }>(
+    `/admin/people/${encodeURIComponent(id)}/role`,
+    { method: 'POST', body: JSON.stringify({ role }) },
+  )
+
 // --- Role identities (PEEK-34) ----------------------------------------------
 
 // `role-identities`, not `roles`: API routes mount before the UI catch-all, so

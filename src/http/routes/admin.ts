@@ -37,6 +37,7 @@ import {
 } from '../../domain/reinstate.js'
 import { addMemberCommand, admitMember } from '../../domain/relay-membership.js'
 import { RoleRefused, createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
+import { RoleChangeRefused, setUserRole } from '../../domain/users.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { adminOnly } from '../middleware/admin.js'
@@ -45,6 +46,8 @@ const createRoleSchema = z.object({
   displayName: z.string().min(1).max(200),
   email: z.string().email().optional(),
 })
+
+const roleSchema = z.object({ role: z.enum(['admin', 'member']) })
 
 const credentialSchema = z.object({
   clientId: z
@@ -296,6 +299,50 @@ export function adminRoutes(): Hono<AppEnv> {
    * from inside the app at all and needs the same shell access that mints the
    * bootstrap invite.
    */
+  /**
+   * Grant or withdraw admin (PEEK-163).
+   *
+   * Admin used to be settable only at account creation, so a workspace whose
+   * only admin left had no route back that did not involve `psql`. It is also
+   * what unblocks onboarding a second person: everything else on this surface
+   * is `adminOnly`, so the first person cannot share the work without this.
+   *
+   * **You cannot change your own role.** Demoting yourself is the one move
+   * nobody recovers from without shell access — the same reasoning that refuses
+   * self-offboarding, and here it doubles as the guarantee that the workspace
+   * always keeps at least one admin: an admin may only demote somebody else,
+   * which leaves themselves.
+   *
+   * Withdrawing is offered alongside granting deliberately. A grant with no
+   * matching revoke means a mis-click is permanent, and permanent mistakes are
+   * how a console teaches people to avoid it.
+   */
+  routes.post('/admin/people/:id/role', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const target = c.req.param('id')
+
+    const body = roleSchema.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) throw badRequest('Expected { role: "admin" | "member" }')
+
+    if (target === actorUserId) {
+      throw badRequest('You cannot change your own role', { reason: 'self_role_change' })
+    }
+
+    try {
+      const result = await setUserRole(target, body.data.role, {
+        actorUserId,
+        requestId: c.get('requestId'),
+      })
+      return c.json(result)
+    } catch (error) {
+      if (error instanceof RoleChangeRefused) {
+        if (error.reason === 'no_such_person') throw notFound('No such person')
+        throw badRequest(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+  })
+
   routes.post('/admin/people/:id/recovery', ...adminOnly, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const target = c.req.param('id')
