@@ -64,7 +64,19 @@ export const SEED_APPS: readonly SeedApp[] = [
     // Convex row resolved, the card rendered resolved, and `/sign` refused with
     // `kind_not_allowed` in a console line nobody was watching. A ceiling that
     // is too low fails at the last step, after everything else has agreed.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101],
+    //
+    // 9002 is NIP-29 edit-channel-metadata — renaming a topic. Peek writes it
+    // for itself, like 9101 above. Buzz needed no change for renames because it
+    // already applies a `name` tag in `handle_edit_metadata`, and it grants that
+    // to a channel's owner or admin only — so this ceiling says Peek may sign
+    // the kind, not that any given rename is permitted.
+    //
+    // Third time now: 1851, then 9101, now this. Each one shipped, worked
+    // everywhere it was checked, and failed at `/sign`. Renaming was the
+    // clearest yet — the topic really is renamed locally, so the app is correct
+    // and the relay simply never hears, and only a warning under the dialog
+    // distinguishes that from success.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
