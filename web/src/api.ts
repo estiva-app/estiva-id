@@ -197,6 +197,19 @@ export type AdmitResult =
 export const admitToRelay = (id: string) =>
   request<AdmitResult>(`/admin/people/${encodeURIComponent(id)}/admit`, { method: 'POST' })
 
+/**
+ * Publish somebody's `kind:0` again (PEEK-165).
+ *
+ * Admission publishes one from now on, so this is the repair for identities
+ * that predate it — chiefly service identities, which never had one at all and
+ * therefore appear in every app as a truncated pubkey.
+ */
+export const publishProfileFor = (id: string) =>
+  request<{ published: boolean; eventId?: string; reason?: string }>(
+    `/admin/people/${encodeURIComponent(id)}/publish-profile`,
+    { method: 'POST' },
+  )
+
 // --- Adding a person (PEEK-65) ----------------------------------------------
 
 /**

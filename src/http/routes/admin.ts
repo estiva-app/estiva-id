@@ -29,6 +29,7 @@ import {
   OperatorIdentity,
   offboardPerson,
 } from '../../domain/offboarding.js'
+import { publishProfile } from '../../domain/profile.js'
 import { RecoveryRefused, createRecovery } from '../../domain/recovery.js'
 import {
   NoSuchPerson as NoSuchReinstateTarget,
@@ -275,15 +276,85 @@ export function adminRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
+    /*
+      Publish the profile now, and not a moment earlier (PEEK-165).
+
+      Order is the whole of it: the relay drops a `kind:0` from a pubkey it does
+      not admit, so publishing at creation leaves an identity whose name resolves
+      nowhere. Enrolment already learned this — `auth.ts` publishes only once
+      admission has succeeded, for exactly the same reason.
+
+      Nothing did this for a **role identity**, which is why the Claude agent
+      wrote to production for a day attributed to `b38fd268…` rather than a name:
+      its display name lived in this database and never reached the relay, where
+      every other app looks.
+
+      Best-effort and non-fatal. Admission is the thing that was asked for and it
+      succeeded; a profile that did not publish is a repair (`publish-profile`
+      below), not a reason to report the admission as failed.
+    */
+    let profilePublished: boolean | undefined
+    if (result.ok) {
+      const outcome = await publishProfile(target, { requestId: c.get('requestId') })
+      profilePublished = outcome.published
+      if (!outcome.published) {
+        c.get('log').warn(
+          { userId: target, pubkey: person.pubkey, reason: outcome.reason },
+          'admitted but could not publish the profile',
+        )
+      }
+    }
+
     return c.json(
       result.ok
-        ? { admitted: true, alreadyAdmitted: result.alreadyInState === true }
+        ? {
+            admitted: true,
+            alreadyAdmitted: result.alreadyInState === true,
+            profilePublished,
+          }
         : {
             admitted: false,
             reason: result.reason ?? 'unknown',
             command: addMemberCommand(person.pubkey),
           },
     )
+  })
+
+  /**
+   * Publish somebody's `kind:0` again (PEEK-165).
+   *
+   * The repair path, the same shape as `admit` above: admission publishes a
+   * profile from now on, and this is how an identity that predates that gets
+   * one without being offboarded and put back.
+   *
+   * Needed because the fix cannot be retroactive on its own — the agent that
+   * has been writing to production already exists and is already admitted, so
+   * no future admission will ever fire for it.
+   *
+   * `kind:0` is published here rather than through `/sign`, which refuses that
+   * kind for every app. That refusal is what keeps two apps from each inventing
+   * a name for one person (PEEK-31); this internal path is the one caller it
+   * exists to leave room for, not a loophole in it.
+   */
+  routes.post('/admin/people/:id/publish-profile', ...adminOnly, async (c) => {
+    const target = c.req.param('id')
+    const person = await getDirectoryEntry(target)
+    if (!person) throw notFound('No such person')
+    if (!person.pubkey) {
+      throw badRequest('That identity has no active key, so there is nothing to publish', {
+        reason: 'no_key',
+      })
+    }
+
+    const outcome = await publishProfile(target, { requestId: c.get('requestId') })
+    if (outcome.published) return c.json({ published: true, eventId: outcome.eventId })
+
+    /*
+      Reported rather than thrown. The commonest reason is that the pubkey is
+      not admitted, which is a different button on the same page — telling an
+      admin which one is more use than a 500.
+    */
+    return c.json({ published: false, reason: outcome.reason ?? 'unknown' })
   })
 
   /**
