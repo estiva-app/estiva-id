@@ -460,3 +460,111 @@ describe('granting and withdrawing admin', () => {
     expect(response.status).toBe(400)
   })
 })
+
+/**
+ * Giving an identity a name on the relay (PEEK-165).
+ *
+ * A role identity never got a `kind:0`, so the Claude agent wrote to production
+ * attributed to `b38fd268…` — and the activity feed rendered "b38fd268… set
+ * assignee to b38fd268…", where actor and subject are indistinguishable.
+ *
+ * The ordering is the part worth pinning. A profile published before the pubkey
+ * is admitted is dropped by the relay, leaving a name that resolves nowhere,
+ * which is why enrolment already waits for admission before publishing.
+ */
+describe('publishing a profile', () => {
+  it('publishes one when a pubkey is admitted', async () => {
+    relayAccepts()
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const operator = await createUserWithKey({ displayName: 'Relay Operator', kind: 'role' })
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    // Admission is signed as the operator, so there has to be one — the same
+    // arrangement the admit tests above make.
+    await withOperator(operator.id, async () => {
+      const response = await post(`/admin/people/${bot.id}/admit`, cookie)
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toMatchObject({
+        admitted: true,
+        profilePublished: true,
+      })
+    })
+  })
+
+  /*
+    Admission is what was asked for. A profile that did not publish is a repair,
+    not a reason to report the admission as failed — reporting it as failed would
+    send an admin to re-admit somebody who is already a member.
+  */
+  it('still reports the admission when the profile could not be published', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    const operator = await createUserWithKey({ displayName: 'Relay Operator', kind: 'role' })
+
+    // The membership event is accepted; the profile that follows is refused.
+    let call = 0
+    vi.stubGlobal('fetch', async () => {
+      call += 1
+      return new Response(
+        JSON.stringify(call === 1 ? { accepted: true } : { accepted: false, message: 'nope' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    })
+
+    await withOperator(operator.id, async () => {
+      const response = await post(`/admin/people/${bot.id}/admit`, cookie)
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toMatchObject({
+        admitted: true,
+        profilePublished: false,
+      })
+    })
+  })
+
+  it('can be published again on demand, for identities that predate this', async () => {
+    relayAccepts()
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    const response = await post(`/admin/people/${bot.id}/publish-profile`, cookie)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ published: true })
+  })
+
+  /*
+    Reported rather than thrown: the commonest cause is a pubkey that is not
+    admitted, which is a different button on the same page. Telling an admin
+    which one is more use than a 500.
+  */
+  it('reports a refusal rather than failing the request', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ accepted: false, message: 'restricted' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    const response = await post(`/admin/people/${bot.id}/publish-profile`, cookie)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ published: false })
+  })
+
+  it('needs an admin', async () => {
+    const { cookie } = await signedInAs('member@example.test', 'member')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+    expect((await post(`/admin/people/${bot.id}/publish-profile`, cookie)).status).toBe(403)
+  })
+
+  it('404s for somebody who does not exist', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    expect(
+      (await post('/admin/people/00000000-0000-0000-0000-000000000000/publish-profile', cookie))
+        .status,
+    ).toBe(404)
+  })
+})

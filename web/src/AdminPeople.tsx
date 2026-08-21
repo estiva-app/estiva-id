@@ -44,6 +44,7 @@ import {
   issueServiceCredential,
   listPeople,
   offboardPerson,
+  publishProfileFor,
   reinstatePerson,
   setPersonRole,
 } from './api'
@@ -715,6 +716,8 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         }}
       />
 
+      <ProfileCard person={person} />
+
       <RoleCard
         person={person}
         onDone={() => {
@@ -1015,6 +1018,67 @@ function AdmitCard({ person, onDone }: { person: Person; onDone: () => void }) {
  * server refuses both; not drawing the button means an admin never presses one
  * that cannot work.
  */
+/**
+ * Give an identity a name on the relay (PEEK-165).
+ *
+ * A profile is published when a pubkey is admitted, so anybody onboarded from
+ * now on has one. This is the repair for those who predate that — in practice
+ * service identities, which never had a profile at all.
+ *
+ * The symptom is not subtle. An agent writing without one appears in Ship and
+ * Peek as `b38fd268…`, and the activity feed renders "b38fd268… set assignee to
+ * b38fd268…", where actor and subject are indistinguishable.
+ *
+ * Offered for role identities only. A person gets one through enrolment, so a
+ * button here would mostly be a way to republish something already correct.
+ */
+function ProfileCard({ person }: { person: Person }) {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  if (person.kind !== 'role' || person.status !== 'active') return null
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      const result = await publishProfileFor(person.id)
+      setNote(
+        result.published
+          ? 'Published. Their name now appears in the other apps instead of a public key.'
+          : `The relay did not accept it (${result.reason}). If they are not admitted yet, admit them first — the relay drops a profile from a pubkey it does not know.`,
+      )
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not publish the profile')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Profile on the relay</h2>
+      </div>
+      <p className="card-note">
+        Without this, everything this identity writes is attributed to its public key rather than
+        its name — in Ship, in Peek, and anywhere else reading the same events.
+      </p>
+
+      {error && <div className="notice error">{error}</div>}
+      {note && <div className="notice ok">{note}</div>}
+
+      <div className="row">
+        <button type="button" onClick={() => void run()} disabled={busy}>
+          {busy ? 'Publishing…' : 'Publish profile'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function RoleCard({ person, onDone }: { person: Person; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
