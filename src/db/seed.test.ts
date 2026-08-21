@@ -19,6 +19,7 @@ const app = (clientId: string) => {
 /** Peek's own kinds, from `peek-app/convex/nostr/events.ts`. */
 const PEEK = {
   ASSERTION: 9101,
+  EDIT_CHANNEL_METADATA: 9002,
 } as const
 
 /** Ship's kinds, from `estiva-ship/src/kinds.ts`. */
@@ -66,6 +67,17 @@ describe('seeded signing policies', () => {
     // resolved, the card rendered resolved, and `/sign` refused with
     // `kind_not_allowed` in a console line nobody was watching.
     expect(app('estiva-peek').allowedKinds).toContain(PEEK.ASSERTION)
+  })
+
+  it('lets Peek sign the metadata edit a topic rename is', () => {
+    // Renaming needed no Buzz change — the relay already applies a `name` tag
+    // in `handle_edit_metadata` — so the whole feature shipped and then failed
+    // only here, with `policy_violation / kind_not_allowed` from `/sign`.
+    //
+    // The failure is quieter than the two above: the topic *is* renamed in
+    // Peek, so every screen is correct and only the relay is unaware, leaving
+    // other apps on the old name.
+    expect(app('estiva-peek').allowedKinds).toContain(PEEK.EDIT_CHANNEL_METADATA)
   })
 
   it('no longer seeds the retired linear-lite credential', () => {
