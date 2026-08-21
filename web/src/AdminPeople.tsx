@@ -45,6 +45,7 @@ import {
   listPeople,
   offboardPerson,
   reinstatePerson,
+  setPersonRole,
 } from './api'
 
 const formatDate = (iso: string) =>
@@ -714,6 +715,13 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         }}
       />
 
+      <RoleCard
+        person={person}
+        onDone={() => {
+          void load()
+        }}
+      />
+
       <ReinstateCard
         person={person}
         onDone={() => {
@@ -991,6 +999,76 @@ function AdmitCard({ person, onDone }: { person: Person; onDone: () => void }) {
  * because the devices were leaving with somebody; a recovery link is the next
  * step, and it is on this same page.
  */
+/**
+ * Who else may run this console (PEEK-163).
+ *
+ * Admin used to be settable only when an account was created, so the first
+ * admin could not share the work: every route on this surface is admin-only,
+ * and there was no way in short of `psql`.
+ *
+ * Both directions are offered. A grant with no revoke makes a mis-click
+ * permanent, and permanent mistakes are what teach people to avoid a screen.
+ *
+ * Shown only for an active person. A bot cannot be an admin — that keeps "is
+ * this a person" and "what may they do" independent — and an offboarded account
+ * must not collect a privilege that reinstating would silently restore. The
+ * server refuses both; not drawing the button means an admin never presses one
+ * that cannot work.
+ */
+function RoleCard({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  if (person.kind !== 'user' || person.status !== 'active') return null
+
+  const isAdmin = person.role === 'admin'
+  const next = isAdmin ? 'member' : 'admin'
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      const result = await setPersonRole(person.id, next)
+      setNote(
+        result.changed
+          ? result.to === 'admin'
+            ? 'They are an admin now.'
+            : 'They are no longer an admin.'
+          : `No change — they were already ${result.to === 'admin' ? 'an admin' : 'a member'}.`,
+      )
+      onDone()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not change their role')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Admin access</h2>
+      </div>
+      <p className="card-note">
+        {isAdmin
+          ? 'They can see this console, add people, offboard them and grant admin to others.'
+          : 'They can sign in and use the apps, and cannot see this console.'}
+      </p>
+
+      {error && <div className="notice error">{error}</div>}
+      {note && <div className="notice ok">{note}</div>}
+
+      <div className="row">
+        <button type="button" onClick={() => void run()} disabled={busy}>
+          {busy ? 'Saving…' : isAdmin ? 'Withdraw admin' : 'Make them an admin'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function ReinstateCard({ person, onDone }: { person: Person; onDone: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)

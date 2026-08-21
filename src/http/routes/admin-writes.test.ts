@@ -21,8 +21,9 @@ import {
 } from '../../domain/admission.js'
 import type { DirectoryEntry } from '../../domain/directory.js'
 import { offboardPerson } from '../../domain/offboarding.js'
+import { createRoleIdentity } from '../../domain/roles.js'
 import { createSession } from '../../domain/sessions.js'
-import { createUserWithKey } from '../../domain/users.js'
+import { createUserWithKey, findUserById, setUserStatus } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
 import { createApp } from '../app.js'
 
@@ -313,5 +314,149 @@ describe('the operator is marked on the list (PEEK-102)', () => {
 
     expect(people.find((person) => person.id === operator.id)?.isOperator).toBe(true)
     expect(people.find((person) => person.id === ada.id)?.isOperator).toBe(false)
+  })
+})
+
+/**
+ * Granting admin (PEEK-163).
+ *
+ * Admin was settable only at account creation, so a workspace whose only admin
+ * left had no route back that did not involve `psql` — and, more immediately, no
+ * first admin could share the console with a second person, because every route
+ * on it is `adminOnly`.
+ *
+ * What these pin is mostly the refusals. A grant is easy to get right and fails
+ * loudly; the refusals are the half that quietly matter, because each one is a
+ * state the caller could not have known from the row they clicked.
+ */
+describe('granting and withdrawing admin', () => {
+  const setRole = (id: string, role: 'admin' | 'member', cookie: string) =>
+    app.request(`/admin/people/${id}/role`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ role }),
+    })
+
+  it('promotes a member, and the change is what they are afterwards', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { user } = await signedInAs('kat@example.test', 'member')
+
+    const response = await setRole(user.id, 'admin', cookie)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      from: 'member',
+      to: 'admin',
+      changed: true,
+    })
+
+    // Read back rather than trusting the reply: the reply is the thing under test.
+    expect((await findUserById(user.id))?.role).toBe('admin')
+  })
+
+  it('and the promoted person can then use the console', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const kat = await signedInAs('kat@example.test', 'member')
+
+    expect((await app.request('/admin/people', { headers: { cookie: kat.cookie } })).status).toBe(
+      403,
+    )
+    await setRole(kat.user.id, 'admin', cookie)
+    expect((await app.request('/admin/people', { headers: { cookie: kat.cookie } })).status).toBe(
+      200,
+    )
+  })
+
+  it('withdraws it again, so a mis-click is not permanent', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { user } = await signedInAs('kat@example.test', 'admin')
+
+    await expect((await setRole(user.id, 'member', cookie)).json()).resolves.toMatchObject({
+      from: 'admin',
+      to: 'member',
+    })
+    expect((await findUserById(user.id))?.role).toBe('member')
+  })
+
+  it('writes nothing when the role is already what was asked for', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { user } = await signedInAs('kat@example.test', 'member')
+
+    await expect((await setRole(user.id, 'member', cookie)).json()).resolves.toMatchObject({
+      changed: false,
+    })
+  })
+
+  it('needs an admin', async () => {
+    const { cookie } = await signedInAs('member@example.test', 'member')
+    const { user } = await signedInAs('kat@example.test', 'member')
+    expect((await setRole(user.id, 'admin', cookie)).status).toBe(403)
+  })
+
+  /**
+   * The one nobody recovers from without shell access.
+   *
+   * It doubles as the guarantee that a workspace always keeps an admin: since
+   * an admin may only change somebody *else*, they are always left standing.
+   */
+  it('refuses to let an admin change their own role', async () => {
+    const { user, cookie } = await signedInAs('admin@example.test', 'admin')
+
+    const response = await setRole(user.id, 'member', cookie)
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'self_role_change' } },
+    })
+    expect((await findUserById(user.id))?.role).toBe('admin')
+  })
+
+  /**
+   * `createRoleIdentity` defaults a bot to `member` on purpose, to keep "is
+   * this a person" and "what may they do" independent. Promoting one here would
+   * quietly re-correlate them and hand a workspace-admin role to something no
+   * passkey guards.
+   */
+  it('refuses to make a bot an admin', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    const response = await setRole(bot.id, 'admin', cookie)
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'not_a_human' } },
+    })
+  })
+
+  /*
+    A dormant privilege is worse than a refused one: reinstating checks status,
+    not what the account was granted while it was away.
+  */
+  it('refuses an offboarded identity', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { user } = await signedInAs('kat@example.test', 'member')
+    await setUserStatus(user.id, 'offboarded')
+
+    const response = await setRole(user.id, 'admin', cookie)
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'not_active' } },
+    })
+  })
+
+  it('404s for somebody who does not exist', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    expect((await setRole('00000000-0000-0000-0000-000000000000', 'admin', cookie)).status).toBe(
+      404,
+    )
+  })
+
+  it('refuses a role that is not a role', async () => {
+    const { cookie } = await signedInAs('admin@example.test', 'admin')
+    const { user } = await signedInAs('kat@example.test', 'member')
+    const response = await app.request(`/admin/people/${user.id}/role`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ role: 'owner' }),
+    })
+    expect(response.status).toBe(400)
   })
 })

@@ -5,7 +5,7 @@
  * published to a relay, and it never appears in a kind:0 event. That split is
  * the point of having a private directory alongside the public profile.
  */
-import { queryOne, withTransaction } from '../db/pool.js'
+import { query, queryOne, withTransaction } from '../db/pool.js'
 import { recordAudit } from './audit.js'
 import { mintKeyForUser } from './keys.js'
 
@@ -134,6 +134,82 @@ export async function setUserStatus(
   })
 
   return result
+}
+
+/**
+ * Why a role change was refused, in terms an admin screen can act on.
+ *
+ * Separated from a bare error so the console can say which rule was hit. Every
+ * one of these is a state the caller could not have known from the row they
+ * clicked, which is exactly when a generic failure is most annoying.
+ */
+export class RoleChangeRefused extends Error {
+  constructor(readonly reason: 'no_such_person' | 'not_a_human' | 'not_active') {
+    super(
+      {
+        no_such_person: 'No such person',
+        not_a_human: 'A role identity cannot be an admin',
+        not_active: 'Only an active identity can change role',
+      }[reason],
+    )
+    this.name = 'RoleChangeRefused'
+  }
+}
+
+/**
+ * Promote or demote somebody (PEEK-163).
+ *
+ * Admin was previously set once, at account creation, and never afterwards —
+ * so a workspace whose only admin left had no path back that did not involve
+ * `psql`. This is that path.
+ *
+ * ## What it refuses, and why each one is not obvious from a row
+ *
+ * **A role identity is never an admin.** `createRoleIdentity` defaults a bot to
+ * `member` deliberately, to keep "is this a person" and "what may they do"
+ * independent rather than accidentally correlated. Letting the console promote
+ * one would quietly re-correlate them, and a bot with a workspace-admin role is
+ * a capability nobody asked for and no passkey guards.
+ *
+ * **An inactive identity cannot change role.** Granting admin to somebody
+ * offboarded creates a dormant privilege that reactivating silently restores —
+ * the reinstate flow checks status, not what the account gained while away.
+ *
+ * ## What it does not police
+ *
+ * Whether the *caller* may do this at all, and whether they are editing their
+ * own row. Both are the route's, because both are facts about the request
+ * rather than about the target — see `admin.ts`.
+ *
+ * Idempotent: setting the role somebody already has writes nothing and records
+ * nothing, because an audit trail full of no-ops is one nobody reads.
+ */
+export async function setUserRole(
+  userId: string,
+  role: User['role'],
+  by: { actorUserId?: string | undefined; requestId?: string | undefined } = {},
+): Promise<{ from: User['role']; to: User['role']; changed: boolean }> {
+  const before = await findUserById(userId)
+  if (!before) throw new RoleChangeRefused('no_such_person')
+  if (before.kind !== 'human') throw new RoleChangeRefused('not_a_human')
+  if (before.status !== 'active') throw new RoleChangeRefused('not_active')
+
+  if (before.role === role) return { from: before.role, to: role, changed: false }
+
+  await query('update users set role = $2, updated_at = now() where id = $1', [userId, role])
+
+  await recordAudit({
+    actorType: by.actorUserId ? 'user' : 'system',
+    actorUserId: by.actorUserId,
+    action: 'user.role_change',
+    outcome: 'success',
+    // The subject is who it was done to; the actor is the admin who did it.
+    subjectPubkey: await activePubkeyFor(userId),
+    detail: { subjectUserId: userId, from: before.role, to: role },
+    requestId: by.requestId,
+  })
+
+  return { from: before.role, to: role, changed: true }
 }
 
 /** Offboard a person: they stop being able to act, but keep their history. */
