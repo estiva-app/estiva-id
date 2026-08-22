@@ -115,6 +115,13 @@ export interface ServiceCredential {
   name: string
   actsAsUserId: string
   pubkey: string | null
+  /**
+   * The kinds this credential may sign, returned so a caller can be told.
+   *
+   * Selected here rather than fetched separately because the row is already
+   * open — and because a second query would be a second chance to forget.
+   */
+  allowedKinds: number[]
 }
 
 export interface IssuedServiceCredential extends ServiceCredential {
@@ -201,6 +208,7 @@ export async function issueServiceCredential(input: {
     clientId: input.clientId,
     name: input.name,
     actsAsUserId: input.userId,
+    allowedKinds: input.allowedKinds,
     pubkey: (await getActivePubkey(input.userId)) ?? null,
     secret,
   }
@@ -222,11 +230,12 @@ export async function authenticateServiceCredential(
     name: string
     client_secret_hash: Buffer | null
     acts_as_user_id: string | null
+    allowed_kinds: number[]
     status: string
     user_status: string | null
     user_kind: string | null
   }>(
-    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.status,
+    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.allowed_kinds, a.status,
             u.status as user_status, u.kind as user_kind
        from app_credentials a
        left join users u on u.id = a.acts_as_user_id
@@ -256,6 +265,7 @@ export async function authenticateServiceCredential(
     clientId: row.client_id,
     name: row.name,
     actsAsUserId: row.acts_as_user_id,
+    allowedKinds: row.allowed_kinds,
     pubkey: (await getActivePubkey(row.acts_as_user_id)) ?? null,
   }
 }

@@ -90,9 +90,30 @@ const refreshGrantSchema = z.object({
  * grants. The session grant is same-origin and the client-credentials grant has
  * a secret it can present again, so neither needs one, and issuing a long-lived
  * credential to a caller with no use for it is pure downside.
+ *
+ * ## `allowed_kinds`, and why it is here rather than nowhere
+ *
+ * The ceiling `/sign` enforces was knowable only to this service, so an app
+ * discovered its own limits by attempting something and being refused at the
+ * last step — after its own state had already changed. **Five features have
+ * shipped that way** (PEEK-172): a Ship change from Peek, a resolution, a topic
+ * rename, a topic delete, and an agent creating a topic. Every one of them was
+ * locally correct; the row was written, the screen re-rendered, and only the
+ * relay never heard. `src/db/seed.ts` carries the running account.
+ *
+ * A local success and a remote refusal are indistinguishable from inside an
+ * app, which is what makes that failure quiet. Returning the ceiling makes it
+ * answerable *before* the attempt: an agent can decline to advertise a tool it
+ * cannot sign for, a UI can disable an action rather than performing it and
+ * silently not publishing.
+ *
+ * **Not a secret.** It is a fact about the caller, the caller is authenticated,
+ * and the caller is the one thing the fact is about. Withholding it protected
+ * nothing and cost five debugging sessions.
  */
 function tokenResponse(
   issued: { token: string; expiresIn: number; pubkey: string },
+  allowedKinds: number[],
   refreshToken?: string,
 ) {
   return {
@@ -101,6 +122,7 @@ function tokenResponse(
     expires_in: issued.expiresIn,
     pubkey: issued.pubkey,
     issuer: config().ISSUER_URL,
+    allowed_kinds: allowedKinds,
     ...(refreshToken ? { refresh_token: refreshToken } : {}),
   }
 }
@@ -224,7 +246,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued))
+    return c.json(tokenResponse(issued, app.allowedKinds))
   })
 
   /**
@@ -319,7 +341,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, refresh?.refreshToken))
+    return c.json(tokenResponse(issued, app.allowedKinds, refresh?.refreshToken))
   }
 
   /**
@@ -396,7 +418,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, redemption.refreshToken))
+    return c.json(tokenResponse(issued, app.allowedKinds, redemption.refreshToken))
   }
 
   /**
@@ -450,7 +472,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued))
+    return c.json(tokenResponse(issued, credential.allowedKinds))
   }
 
   return routes
