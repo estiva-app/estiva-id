@@ -27,6 +27,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { query, queryOne, withTransaction } from '../db/pool.js'
 import { getActivePubkey } from './keys.js'
+import { saveProfile } from './profile.js'
 import { type UserWithPubkey, createUserWithKey } from './users.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
@@ -65,6 +66,48 @@ export async function createRoleIdentity(input: {
     // rather than accidentally correlated.
     role: 'member',
   })
+}
+
+/**
+ * Rename a role identity, so the relay learns what it is called.
+ *
+ * A bot's name is not its own to set. A person edits theirs through
+ * `PUT /me/profile`, holding a session and a passkey; a role identity has
+ * neither, so the only way its name can ever change is an admin acting on it.
+ * Without this there was no way at all — `createRoleIdentity` captured a display
+ * name once and nothing could revise it afterwards, which is how an agent ended
+ * up posting into a team conversation under a name that said nothing about
+ * whose it was (PEEK-149).
+ *
+ * **Refuses a person, for the same reason `issueServiceCredential` does.**
+ * Renaming a human through an admin route would let somebody change how another
+ * person appears in every app without their key — the thing every other path
+ * here exists to prevent — and it would put a second writer on a profile that
+ * PEEK-31 deliberately gave one.
+ *
+ * Saving is all this does. Publishing the `kind:0` is the caller's, because the
+ * store is the record and the relay is a projection of it: a relay outage must
+ * leave the rename standing and the projection stale, visibly.
+ */
+export async function renameRoleIdentity(input: {
+  userId: string
+  displayName: string
+}): Promise<{ id: string; displayName: string; previousDisplayName: string | null }> {
+  const target = await queryOne<{ kind: string; status: string; display_name: string | null }>(
+    'select kind, status, display_name from users where id = $1',
+    [input.userId],
+  )
+  if (!target) throw new RoleRefused('no_such_identity')
+  if (target.kind !== 'role') throw new RoleRefused('not_a_role')
+  if (target.status !== 'active') throw new RoleRefused('not_active')
+
+  await saveProfile(input.userId, { displayName: input.displayName })
+
+  return {
+    id: input.userId,
+    displayName: input.displayName,
+    previousDisplayName: target.display_name,
+  }
 }
 
 export interface ServiceCredential {

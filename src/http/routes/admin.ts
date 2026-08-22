@@ -37,7 +37,12 @@ import {
   reinstatePerson,
 } from '../../domain/reinstate.js'
 import { addMemberCommand, admitMember } from '../../domain/relay-membership.js'
-import { RoleRefused, createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
+import {
+  RoleRefused,
+  createRoleIdentity,
+  issueServiceCredential,
+  renameRoleIdentity,
+} from '../../domain/roles.js'
 import { RoleChangeRefused, setUserRole } from '../../domain/users.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
@@ -49,6 +54,8 @@ const createRoleSchema = z.object({
 })
 
 const roleSchema = z.object({ role: z.enum(['admin', 'member']) })
+
+const renameRoleSchema = z.object({ displayName: z.string().min(1).max(200) })
 
 const credentialSchema = z.object({
   clientId: z
@@ -492,6 +499,70 @@ export function adminRoutes(): Hono<AppEnv> {
     })
 
     return c.json({ identity: { id: identity.id, pubkey: identity.pubkey } })
+  })
+
+  /**
+   * Rename a role identity, and republish the `kind:0` that carries the name.
+   *
+   * A role identity has no session and no passkey, so unlike a person it cannot
+   * edit its own profile. Until this existed its name was fixed at creation
+   * forever, which stopped mattering the moment an agent started posting into
+   * team conversations: in a chat, a message from "Claude" reads as a colleague
+   * and nothing says whose agent it is (PEEK-149).
+   *
+   * **The republish is the point, not a courtesy.** PEEK-165 was exactly this
+   * gap in its first half — a display name captured here and never sent to the
+   * relay, so every app rendered a hex string. Storing a new name without
+   * publishing it would recreate that bug and look like it had worked.
+   *
+   * Reported rather than enforced, matching `PUT /me/profile`: the rename is
+   * saved either way, and `published: false` makes a stale projection visible
+   * instead of silent.
+   */
+  routes.patch('/admin/role-identities/:id', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const body = renameRoleSchema.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) throw badRequest('Expected { displayName }')
+
+    let renamed: Awaited<ReturnType<typeof renameRoleIdentity>>
+    try {
+      renamed = await renameRoleIdentity({
+        userId: c.req.param('id'),
+        displayName: body.data.displayName,
+      })
+    } catch (error) {
+      if (error instanceof RoleRefused) {
+        if (error.reason === 'no_such_identity') throw notFound('No such identity')
+        throw conflict(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+
+    const outcome = await publishProfile(renamed.id, { requestId: c.get('requestId') })
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId,
+      action: 'role.rename',
+      outcome: 'success',
+      detail: {
+        subjectUserId: renamed.id,
+        from: renamed.previousDisplayName,
+        to: renamed.displayName,
+        // Whether the name actually reached the relay is the load-bearing fact
+        // here, and the one somebody will want during an incident.
+        published: outcome.published,
+        ...(outcome.published ? {} : { publishError: outcome.reason ?? null }),
+      },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json({
+      identity: { id: renamed.id, displayName: renamed.displayName },
+      published: outcome.published,
+      eventId: outcome.eventId ?? null,
+      ...(outcome.published ? {} : { publishError: outcome.reason ?? null }),
+    })
   })
 
   /**

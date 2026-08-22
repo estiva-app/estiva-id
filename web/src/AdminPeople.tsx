@@ -46,6 +46,7 @@ import {
   offboardPerson,
   publishProfileFor,
   reinstatePerson,
+  renameRoleIdentity,
   setPersonRole,
 } from './api'
 
@@ -716,6 +717,13 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         }}
       />
 
+      <RenameRoleCard
+        person={person}
+        onDone={() => {
+          void load()
+        }}
+      />
+
       <ProfileCard person={person} />
 
       <RoleCard
@@ -1218,6 +1226,101 @@ function ReinstateCard({ person, onDone }: { person: Person; onDone: () => void 
           <button type="button" onClick={() => setConfirming(true)}>
             Reinstate this identity
           </button>
+        ))}
+    </section>
+  )
+}
+
+/**
+ * Rename a service identity.
+ *
+ * Only for a role. A person's display name is theirs — they set it on their own
+ * profile, and an admin route that overrode it would put a second writer on the
+ * one thing PEEK-31 deliberately gave a single writer, without their key.
+ *
+ * The name matters more than it looks. A service identity posts into Ship's
+ * activity feed and into Peek conversations, where it renders exactly like a
+ * colleague — same avatar, same name treatment. "Claude" says nothing about
+ * whose agent it is; "Claude (steered by Miky)" does (PEEK-149).
+ *
+ * A display name is a **convention, not a proof** — names are self-set on this
+ * relay, so it says who steered a message only as long as everyone is honest.
+ * The unforgeable version is an owner attestation recorded at token mint, which
+ * is PEEK-164.
+ */
+function RenameRoleCard({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [name, setName] = useState(person.displayName ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<{ published: boolean; publishError?: string | null } | null>(
+    null,
+  )
+
+  if (person.kind !== 'role') return null
+  if (person.status && person.status !== 'active') return null
+
+  async function rename(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    setResult(null)
+    try {
+      const outcome = await renameRoleIdentity(person.id, name.trim())
+      setResult({ published: outcome.published, publishError: outcome.publishError })
+      onDone()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not rename this identity')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Name</h2>
+      </div>
+      <p className="card-note">
+        What every app shows beside anything this identity writes. It appears in Ship's activity
+        feed and in Peek conversations, where it looks exactly like a person — so a name saying
+        whose agent it is, such as <strong>Claude (steered by Miky)</strong>, is worth more than a
+        tidy one.
+      </p>
+
+      <form onSubmit={rename}>
+        <label htmlFor="role-name">Display name</label>
+        <input
+          id="role-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          maxLength={200}
+          disabled={busy}
+        />
+        <button
+          type="submit"
+          disabled={busy || name.trim() === '' || name.trim() === person.displayName}
+        >
+          {busy ? 'Renaming…' : 'Rename'}
+        </button>
+      </form>
+
+      {error && <p className="error">{error}</p>}
+
+      {/*
+        Publishing is reported rather than assumed. A rename that never reached
+        the relay leaves every other app still showing the old name, and that is
+        exactly the state PEEK-165 spent a ticket on — worth seeing rather than
+        discovering later in somebody else's app.
+      */}
+      {result &&
+        (result.published ? (
+          <p className="card-note">Renamed, and the new name is on the relay.</p>
+        ) : (
+          <div className="notice">
+            <strong>Renamed here, but not published.</strong> Other apps will keep showing the old
+            name until this succeeds
+            {result.publishError ? ` (${result.publishError})` : ''}.
+          </div>
         ))}
     </section>
   )
