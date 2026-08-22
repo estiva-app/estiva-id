@@ -76,7 +76,30 @@ export const SEED_APPS: readonly SeedApp[] = [
     // clearest yet — the topic really is renamed locally, so the app is correct
     // and the relay simply never hears, and only a warning under the dialog
     // distinguishes that from success.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002],
+    //
+    // 9008 is NIP-29 delete-group, and it is the first entry here added *before*
+    // the code that needs it rather than after that code failed in production.
+    //
+    // Deleting a topic in Peek deletes it, its messages, replies, reactions and
+    // huddles from Convex and publishes nothing at all. Create propagates as a
+    // 9007; delete propagates nowhere. So a conversation somebody deleted
+    // believing it gone stays readable to every admitted member indefinitely —
+    // measured on prod at 145 messages across 37 stream channels with **zero**
+    // deletion requests against any of them (PEEK-170).
+    //
+    // 9008 rather than a kind:5 per message, and the difference is not
+    // efficiency. Buzz rejects a multi-target kind:5 outright ("deletion events
+    // must reference exactly one target"), and NIP-09 is honoured only for the
+    // key that signed the original — so per-message deletion can never reach
+    // anybody else's messages in the topic. Delete-group soft-deletes the
+    // channel, and Buzz's read guards (`c.deleted_at IS NULL` in both
+    // `get_accessible_channels` and `is_member`) then make the whole container
+    // unreadable, whoever wrote what is in it.
+    //
+    // A ceiling, not a grant: Buzz enforces "only owner can delete group" in
+    // `validate_admin_event`, so this says Peek may sign the kind, not that any
+    // given delete is permitted.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },

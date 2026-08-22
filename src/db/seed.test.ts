@@ -20,6 +20,7 @@ const app = (clientId: string) => {
 const PEEK = {
   ASSERTION: 9101,
   EDIT_CHANNEL_METADATA: 9002,
+  DELETE_GROUP: 9008,
 } as const
 
 /** Ship's kinds, from `estiva-ship/src/kinds.ts`. */
@@ -78,6 +79,25 @@ describe('seeded signing policies', () => {
     // Peek, so every screen is correct and only the relay is unaware, leaving
     // other apps on the old name.
     expect(app('estiva-peek').allowedKinds).toContain(PEEK.EDIT_CHANNEL_METADATA)
+  })
+
+  it('lets Peek sign the delete that makes a deleted topic actually gone', () => {
+    // PEEK-170. Deleting a topic in Peek removes it, its messages, replies,
+    // reactions and huddles from Convex and publishes nothing, so a conversation
+    // somebody deleted believing it gone stays readable to every admitted member
+    // — 145 messages across 37 channels on prod with zero deletion requests
+    // against any of them.
+    //
+    // 9008 rather than a kind:5 per message, and not for efficiency: Buzz
+    // rejects a multi-target kind:5, and NIP-09 is honoured only for the key
+    // that signed the original, so per-message deletion can never reach anybody
+    // else's messages. Delete-group soft-deletes the channel and Buzz's read
+    // guards then hide the whole container regardless of who wrote what.
+    //
+    // First entry in this list added *before* the code that needs it. The three
+    // above were each found by shipping a feature that worked everywhere except
+    // `/sign`.
+    expect(app('estiva-peek').allowedKinds).toContain(PEEK.DELETE_GROUP)
   })
 
   it('no longer seeds the retired linear-lite credential', () => {
