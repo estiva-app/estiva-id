@@ -27,8 +27,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { query, queryOne, withTransaction } from '../db/pool.js'
 import { getActivePubkey } from './keys.js'
-import { type UserWithPubkey, createUserWithKey } from './users.js'
 import { saveProfile } from './profile.js'
+import { type UserWithPubkey, createUserWithKey } from './users.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
 

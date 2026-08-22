@@ -39,7 +39,6 @@ import {
   admitToRelay,
   createInvite,
   createRoleIdentity,
-  renameRoleIdentity,
   getPerson,
   issueRecovery,
   issueServiceCredential,
@@ -47,6 +46,7 @@ import {
   offboardPerson,
   publishProfileFor,
   reinstatePerson,
+  renameRoleIdentity,
   setPersonRole,
 } from './api'
 
@@ -1296,7 +1296,10 @@ function RenameRoleCard({ person, onDone }: { person: Person; onDone: () => void
           maxLength={200}
           disabled={busy}
         />
-        <button type="submit" disabled={busy || name.trim() === '' || name.trim() === person.displayName}>
+        <button
+          type="submit"
+          disabled={busy || name.trim() === '' || name.trim() === person.displayName}
+        >
           {busy ? 'Renaming…' : 'Rename'}
         </button>
       </form>

@@ -556,7 +556,11 @@ describe('renaming a role identity', () => {
     const { cookie } = await signedInAs('member@estiva.test', 'member')
     const bot = await createRoleIdentity({ displayName: 'Release Bot' })
 
-    const response = await patch(`/admin/role-identities/${bot.id}`, { displayName: 'Nope' }, cookie)
+    const response = await patch(
+      `/admin/role-identities/${bot.id}`,
+      { displayName: 'Nope' },
+      cookie,
+    )
     expect(response.status).toBe(403)
   })
 
