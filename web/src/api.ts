@@ -260,6 +260,30 @@ export const createRoleIdentity = (displayName: string) =>
     body: JSON.stringify({ displayName }),
   })
 
+/**
+ * Rename a role identity, republishing the `kind:0` that carries the name.
+ *
+ * A person renames themselves through `PUT /me/profile`, holding a session and
+ * a passkey. A bot has neither, so an admin doing it here is the only way its
+ * name can ever change — and until an agent started posting into conversations,
+ * nothing needed it to (PEEK-149).
+ *
+ * `published` reports whether the new name reached the relay. The rename is
+ * saved either way: the store is the record and the relay is a projection of
+ * it, so an outage must leave a stale projection visible rather than lose the
+ * edit.
+ */
+export const renameRoleIdentity = (id: string, displayName: string) =>
+  request<{
+    identity: { id: string; displayName: string }
+    published: boolean
+    eventId: string | null
+    publishError?: string | null
+  }>(`/admin/role-identities/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ displayName }),
+  })
+
 /** The secret comes back once and is stored only as a hash. */
 export const issueServiceCredential = (
   id: string,

@@ -33,6 +33,13 @@ const post = (path: string, body: unknown, cookie?: string) =>
     body: JSON.stringify(body ?? {}),
   })
 
+const patch = (path: string, body: unknown, cookie?: string) =>
+  app.request(path, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify(body ?? {}),
+  })
+
 async function signedInAs(email: string, role: 'admin' | 'member') {
   const user = await createUserWithKey({ email, role })
   const { token } = await createSession({ userId: user.id })
@@ -467,5 +474,106 @@ describe('creating one through the console', () => {
       "select detail from audit_events where action = 'role.credential'",
     )
     expect(entry?.detail.nip98UrlPrefixes).toEqual(['http://relay.test/'])
+  })
+})
+
+/**
+ * Renaming a role identity (PEEK-149).
+ *
+ * A bot cannot edit its own profile — no session, no passkey — so an admin
+ * acting on it is the only way its name can ever change. Which mattered the
+ * moment an agent started posting into team conversations: in a chat, a message
+ * from "Claude" reads as a colleague and nothing says whose agent it is.
+ */
+describe('renaming a role identity', () => {
+  it('renames it, and says whether the name reached the relay', async () => {
+    const { cookie } = await signedInAs('admin@estiva.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Claude' })
+
+    const response = await patch(
+      `/admin/role-identities/${bot.id}`,
+      { displayName: 'Claude (steered by Miky)' },
+      cookie,
+    )
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as {
+      identity: { displayName: string }
+      published: boolean
+      publishError?: string | null
+    }
+    expect(body.identity.displayName).toBe('Claude (steered by Miky)')
+
+    /*
+      Asserted on the *reason*, not on the shape.
+
+      The first version of this checked `typeof published === 'boolean'`, which
+      a hardcoded `false` satisfies — proved by deleting the republish and
+      watching the test still pass. Since the republish is the whole point of
+      the endpoint (PEEK-165 was a name stored here and never sent to the
+      relay), a check that survives its removal is decoration.
+
+      `relay_not_configured` is `publishProfile`'s own first-line answer when
+      there is no bridge, which there is not in a test. Only actually calling it
+      produces that string. If this suite ever gains a relay, this becomes
+      `published === true` rather than a looser assertion.
+    */
+    expect(body.published).toBe(false)
+    expect(body.publishError).toBe('relay_not_configured')
+
+    const row = await queryOne<{ display_name: string }>(
+      'select display_name from users where id = $1',
+      [bot.id],
+    )
+    expect(row?.display_name).toBe('Claude (steered by Miky)')
+  })
+
+  /*
+    The property this endpoint exists to not violate. Renaming a person through
+    an admin route would change how they appear in every app without their key
+    — the thing every other path here is built to prevent — and would put a
+    second writer on a profile PEEK-31 deliberately gave one.
+  */
+  it('refuses to rename a person', async () => {
+    const { cookie } = await signedInAs('admin2@estiva.test', 'admin')
+    const person = await createUserWithKey({ email: 'someone@estiva.test', role: 'member' })
+
+    const response = await patch(
+      `/admin/role-identities/${person.id}`,
+      { displayName: 'Someone Else' },
+      cookie,
+    )
+    expect(response.status).toBe(409)
+
+    const row = await queryOne<{ display_name: string | null }>(
+      'select display_name from users where id = $1',
+      [person.id],
+    )
+    expect(row?.display_name ?? null).not.toBe('Someone Else')
+  })
+
+  it('refuses a member', async () => {
+    const { cookie } = await signedInAs('member@estiva.test', 'member')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+
+    const response = await patch(`/admin/role-identities/${bot.id}`, { displayName: 'Nope' }, cookie)
+    expect(response.status).toBe(403)
+  })
+
+  it('refuses an identity that does not exist', async () => {
+    const { cookie } = await signedInAs('admin3@estiva.test', 'admin')
+    const response = await patch(
+      '/admin/role-identities/00000000-0000-0000-0000-000000000000',
+      { displayName: 'Ghost' },
+      cookie,
+    )
+    expect(response.status).toBe(404)
+  })
+
+  it('refuses an empty name', async () => {
+    const { cookie } = await signedInAs('admin4@estiva.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Release Bot' })
+    const response = await patch(`/admin/role-identities/${bot.id}`, { displayName: '' }, cookie)
+    expect(response.status).toBe(400)
   })
 })
