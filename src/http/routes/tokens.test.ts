@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { config } from '../../config.js'
 import { closePool, query } from '../../db/pool.js'
 import { issueToken } from '../../domain/jwt.js'
+import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
 import { createApp } from '../app.js'
@@ -171,6 +172,65 @@ describe('POST /token', () => {
 
     const { payload } = await validateAsRelyingParty(body.access_token, 'estiva-peek')
     expect(payload.sub).toBe(ada.pubkey)
+  })
+})
+
+/**
+ * What a caller may sign, told rather than discovered (PEEK-172).
+ *
+ * Five features shipped, worked everywhere they were checked, and failed at
+ * `/sign` — a Ship change from Peek, a resolution, a topic rename, a topic
+ * delete, and an agent creating a topic. Each was locally correct: the row was
+ * written, the screen re-rendered, and only the relay never heard. The ceiling
+ * was knowable only to this service, so every app found its limits by attempting
+ * something and being refused at the last step.
+ *
+ * Asserted on **every grant**, because the failure was never specific to one.
+ */
+describe('the ceiling a token carries', () => {
+  it('tells a session grant what it may sign', async () => {
+    const ada = await createUserWithKey({ email: 'ceiling-session@example.test' })
+    const cookie = await sessionFor(ada.id)
+
+    const response = await app.request('/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ clientId: 'estiva-peek' }),
+    })
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as { allowed_kinds: number[] }
+    // The real seeded policy, not a shape check: a response that carried an
+    // empty array would satisfy `Array.isArray` and tell an app nothing.
+    expect(body.allowed_kinds).toEqual(expect.arrayContaining([9, 7, 5, 27235]))
+  })
+
+  it('tells the client-credentials grant, which is the one a bot uses', async () => {
+    const bot = await createRoleIdentity({ displayName: 'Ceiling Bot' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'ceiling-bot',
+      name: 'Ceiling Bot',
+      // Deliberately narrow. A bot's ceiling is the case that matters here:
+      // it has no screen to show a warning on and nobody watching a console.
+      allowedKinds: [27235, 9],
+    })
+
+    const response = await app.request('/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        grantType: 'client_credentials',
+        clientId: credential.clientId,
+        clientSecret: credential.secret,
+      }),
+    })
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as { allowed_kinds: number[] }
+    expect(body.allowed_kinds).toEqual([27235, 9])
+    // The point of the whole change: a caller can now answer this before acting.
+    expect(body.allowed_kinds).not.toContain(9007)
   })
 })
 
