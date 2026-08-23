@@ -1,3 +1,4 @@
+import { logger } from '../logger.js'
 /**
  * Offboarding, in one action (PEEK-66).
  *
@@ -58,6 +59,7 @@ import { getActivePubkey } from './keys.js'
 import { isOperatorIdentity } from './operator-key.js'
 import { getProfile, publishProfile, saveProfile } from './profile.js'
 import { removeMemberCommand, revokeMember } from './relay-membership.js'
+import { botsOwnedBy } from './roles.js'
 import { findUserById, setUserStatus } from './users.js'
 
 export interface OffboardResult {
@@ -195,6 +197,58 @@ export async function offboardPerson(
     ? await revokeMember(pubkey)
     : { ok: false, reason: 'no active key for this identity' }
 
+  /*
+    The fifth step (PEEK-164), and the one whose absence made the other four
+    incomplete for anybody with a bot.
+
+    `offboardPerson` has always revoked passkeys, sessions, the handle and relay
+    admission, and never touched `app_credentials`. That was right while every
+    role identity was the workspace's — the bot was never theirs. It stopped
+    being right the moment bots became personal: production holds one called
+    "Claude (steered by Miky)", and offboarding Miky would have left it reading
+    and writing the workspace with a credential nobody revoked. Worse than not
+    having offboarded him, because he is gone and nobody is watching it.
+
+    Offboarding the bot's own identity is what stops it: both
+    `authenticateServiceCredential` and `issueServiceCredential` refuse a role
+    whose user row is not active, so no new token can be minted and the existing
+    one dies at its TTL. The credential row is left in place deliberately —
+    deleting it would make a re-issue silently recreate access, and the audit
+    trail would lose what the bot was.
+
+    Recursive rather than inlined, so a bot gets the same four steps its owner
+    did: its key stops being admitted to the relay too, which is the half that
+    would otherwise survive.
+  */
+  const bots = await botsOwnedBy(userId)
+  const botsOffboarded: Array<{
+    userId: string
+    displayName: string | null
+    pubkey: string | null
+  }> = []
+  for (const bot of bots) {
+    try {
+      const result = await offboardPerson(bot.id, by)
+      botsOffboarded.push({ userId: bot.id, displayName: bot.displayName, pubkey: result.pubkey })
+    } catch (error) {
+      /*
+        One bot failing must not strand the rest, and must not undo the human's
+        offboarding, which has already happened. Recorded rather than thrown:
+        the person is out either way, and a bot still live is exactly the fact
+        somebody needs to see.
+      */
+      botsOffboarded.push({
+        userId: bot.id,
+        displayName: bot.displayName,
+        pubkey: null,
+      })
+      logger.error(
+        { botUserId: bot.id, error: error instanceof Error ? error.message : String(error) },
+        'offboarding a bot owned by this person failed',
+      )
+    }
+  }
+
   await recordAudit({
     actorType: by.actorUserId ? 'user' : 'system',
     actorUserId: by.actorUserId,
@@ -213,6 +267,9 @@ export async function offboardPerson(
       ...(publishError ? { publishError } : {}),
       relayAdmissionRevoked: admissionResult.ok,
       ...(admissionResult.ok ? {} : { relayAdmissionError: admissionResult.reason }),
+      // Named, not counted. "2 bots offboarded" is not something anybody can
+      // check afterwards; two identities are.
+      botsOffboarded: botsOffboarded.map((bot) => bot.displayName ?? bot.userId),
     },
     requestId: by.requestId,
   })

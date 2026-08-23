@@ -17,6 +17,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { closePool, query, queryOne } from '../../db/pool.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { offboardPerson } from '../../domain/offboarding.js'
 import { createRecovery } from '../../domain/recovery.js'
 import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { createSession } from '../../domain/sessions.js'
@@ -579,5 +580,108 @@ describe('renaming a role identity', () => {
     const bot = await createRoleIdentity({ displayName: 'Release Bot' })
     const response = await patch(`/admin/role-identities/${bot.id}`, { displayName: '' }, cookie)
     expect(response.status).toBe(400)
+  })
+})
+
+/**
+ * Offboarding a person stops their bot (PEEK-164).
+ *
+ * This is the ticket's done-when and the reason ownership is recorded at all.
+ * `offboardPerson` revoked passkeys, sessions, the handle and relay admission,
+ * and never touched a credential — right while every role identity was the
+ * workspace's, wrong the moment bots became personal. Production holds one
+ * called "Claude (steered by Miky)"; offboarding Miky would have left it
+ * reading and writing with a credential nobody revoked.
+ *
+ * Asserted through the **token grant**, not through a status column. A bot that
+ * is marked offboarded and can still mint a token is not offboarded, and the
+ * column is the mechanism rather than the property.
+ */
+describe('offboarding a person and their bots', () => {
+  it('stops the bot minting tokens', async () => {
+    const owner = await createUserWithKey({ email: 'owner@estiva.test', role: 'member' })
+    const bot = await createRoleIdentity({ displayName: 'Their Bot', ownerUserId: owner.id })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'their-bot',
+      name: 'Their Bot',
+      allowedKinds: [27235],
+    })
+
+    // It works first, or the assertion below proves nothing.
+    const before = await tokenFor(credential.clientId, credential.secret)
+    expect(before.status).toBe(200)
+
+    await offboardPerson(owner.id)
+
+    const after = await tokenFor(credential.clientId, credential.secret)
+    expect(after.status).toBe(401)
+  })
+
+  it('leaves a workspace-owned role alone', async () => {
+    /*
+      The other half of the distinction, and the one that would be catastrophic
+      to get wrong: `Relay Operator` has no owner and must outlive everybody.
+      A cascade that offboarded every role when anybody left would take relay
+      admission for the whole workspace with it.
+    */
+    const leaver = await createUserWithKey({ email: 'leaver@estiva.test', role: 'member' })
+    const orgBot = await createRoleIdentity({ displayName: 'Workspace Bot' })
+    const credential = await issueServiceCredential({
+      userId: orgBot.id,
+      clientId: 'workspace-bot',
+      name: 'Workspace Bot',
+      allowedKinds: [27235],
+    })
+
+    await offboardPerson(leaver.id)
+
+    const after = await tokenFor(credential.clientId, credential.secret)
+    expect(after.status).toBe(200)
+  })
+
+  it('does not touch somebody else’s bot', async () => {
+    const leaver = await createUserWithKey({ email: 'leaver2@estiva.test', role: 'member' })
+    const other = await createUserWithKey({ email: 'other@estiva.test', role: 'member' })
+    const theirBot = await createRoleIdentity({ displayName: 'Other Bot', ownerUserId: other.id })
+    const credential = await issueServiceCredential({
+      userId: theirBot.id,
+      clientId: 'other-bot',
+      name: 'Other Bot',
+      allowedKinds: [27235],
+    })
+
+    await offboardPerson(leaver.id)
+
+    const after = await tokenFor(credential.clientId, credential.secret)
+    expect(after.status).toBe(200)
+  })
+
+  it('records which bots went with them, by name', async () => {
+    const owner = await createUserWithKey({ email: 'owner2@estiva.test', role: 'member' })
+    await createRoleIdentity({ displayName: 'Named Bot', ownerUserId: owner.id })
+
+    await offboardPerson(owner.id)
+
+    const audit = await queryOne<{ detail: { botsOffboarded?: string[] } }>(
+      `select detail from audit_events
+        where action = 'user.offboard' and detail->>'subjectUserId' = $1
+        order by occurred_at desc limit 1`,
+      [owner.id],
+    )
+    // Named rather than counted: "1 bot offboarded" is not checkable afterwards.
+    expect(audit?.detail.botsOffboarded).toEqual(['Named Bot'])
+  })
+
+  /*
+    An owner has to be a human, because the mechanism is offboarding and only a
+    human gets offboarded. A bot owned by a bot would be unreachable by the
+    thing meant to revoke it.
+  */
+  it('refuses a bot owned by another bot', async () => {
+    const parent = await createRoleIdentity({ displayName: 'Parent Bot' })
+    await expect(
+      createRoleIdentity({ displayName: 'Child Bot', ownerUserId: parent.id }),
+    ).rejects.toThrow()
   })
 })
