@@ -252,16 +252,26 @@ export async function createUserWithKey(input: {
   displayName?: string | undefined
   role?: 'admin' | 'member'
   kind?: 'human' | 'role'
+  /**
+   * The human this identity belongs to, for a personal bot (PEEK-164).
+   *
+   * Null for a human and for a workspace-owned role. The column's own check
+   * refuses it on a human; that an owner must itself be human is enforced in
+   * `createRoleIdentity`, since it is a statement about another row.
+   */
+  ownerUserId?: string | null
 }): Promise<UserWithPubkey> {
   return withTransaction(async (client) => {
     const inserted = await client.query<User>(
-      `insert into users (email, display_name, role, kind) values ($1, $2, $3, $4)
+      `insert into users (email, display_name, role, kind, owner_user_id)
+       values ($1, $2, $3, $4, $5)
        returning ${USER_COLUMNS}`,
       [
         input.email ?? null,
         input.displayName ?? null,
         input.role ?? 'member',
         input.kind ?? 'human',
+        input.ownerUserId ?? null,
       ],
     )
     const user = inserted.rows[0]

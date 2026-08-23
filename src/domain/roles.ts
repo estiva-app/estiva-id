@@ -56,11 +56,36 @@ export class RoleRefused extends Error {
 export async function createRoleIdentity(input: {
   displayName: string
   email?: string | null
+  /**
+   * The person this bot belongs to, when it belongs to one.
+   *
+   * Absent means the workspace's — `Relay Operator` is the case that must stay
+   * possible, since it has to outlive whoever set it up. Present means it dies
+   * with that person's access (PEEK-164).
+   */
+  ownerUserId?: string | null
 }): Promise<UserWithPubkey> {
+  /*
+    An owner has to be a human. The mechanism is offboarding, and only a human
+    gets offboarded — a bot owned by a bot would be unreachable by the thing
+    that is supposed to revoke it. Not expressible as a CHECK, because it is a
+    statement about another row, so it is enforced here.
+  */
+  if (input.ownerUserId) {
+    const owner = await queryOne<{ kind: string; status: string }>(
+      'select kind, status from users where id = $1',
+      [input.ownerUserId],
+    )
+    if (!owner) throw new RoleRefused('no_such_identity')
+    if (owner.kind !== 'human') throw new RoleRefused('not_a_role')
+    if (owner.status !== 'active') throw new RoleRefused('not_active')
+  }
+
   return createUserWithKey({
     displayName: input.displayName,
     email: input.email ?? null,
     kind: 'role',
+    ownerUserId: input.ownerUserId ?? null,
     // A bot is not an admin of the workspace. Nothing today reads `role` for a
     // non-human, but defaulting it to `member` keeps the two axes independent
     // rather than accidentally correlated.
@@ -108,6 +133,25 @@ export async function renameRoleIdentity(input: {
     displayName: input.displayName,
     previousDisplayName: target.display_name,
   }
+}
+
+/**
+ * Every role identity belonging to this person.
+ *
+ * Used by offboarding, which is the only reason ownership is recorded at all:
+ * a personal bot has to lose access when its owner does, and nothing else in
+ * this service needs to know who owns what (PEEK-164).
+ */
+export async function botsOwnedBy(
+  ownerUserId: string,
+): Promise<Array<{ id: string; displayName: string | null }>> {
+  const rows = await query<{ id: string; display_name: string | null }>(
+    `select id, display_name from users
+      where owner_user_id = $1 and kind = 'role' and status != 'offboarded'
+      order by created_at`,
+    [ownerUserId],
+  )
+  return rows.rows.map((row) => ({ id: row.id, displayName: row.display_name }))
 }
 
 export interface ServiceCredential {
