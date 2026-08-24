@@ -888,3 +888,92 @@ describe('stopping your own bot', () => {
     expect(response.status).toBe(401)
   })
 })
+
+/**
+ * Widening a credential without rotating its secret.
+ *
+ * There was no way to do this: `issueServiceCredential` upserts
+ * `client_secret_hash` alongside `allowed_kinds`, so a wider ceiling meant a
+ * new secret and therefore a broken laptop, keychain and colleague. That
+ * coupling is why `peek create-topic` shipped against a ceiling nobody wanted
+ * to touch (PEEK-172).
+ */
+describe('changing what a credential may sign', () => {
+  const setKinds = (cookie: string, clientId: string, allowedKinds: number[]) =>
+    app.request(`/admin/credentials/${clientId}/kinds`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ allowedKinds }),
+    })
+
+  it('widens it and leaves the secret working', async () => {
+    const { cookie } = await signedInAs('kinds@estiva.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Widen Me' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'widen-me',
+      name: 'Widen Me',
+      allowedKinds: [27235],
+    })
+
+    expect((await setKinds(cookie, credential.clientId, [27235, 9007])).status).toBe(200)
+
+    /*
+      The whole point, asserted through the grant: the *same* secret still works
+      and the token now reports the wider ceiling. A test that only checked the
+      column would pass even if the secret had been replaced underneath.
+    */
+    const token = await tokenFor(credential.clientId, credential.secret)
+    expect(token.status).toBe(200)
+    const issued = (await token.json()) as { allowed_kinds: number[] }
+    expect(issued.allowed_kinds).toEqual([27235, 9007])
+  })
+
+  it('can narrow as well as widen', async () => {
+    const { cookie } = await signedInAs('narrow@estiva.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Narrow Me' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'narrow-me',
+      name: 'Narrow Me',
+      allowedKinds: [27235, 9, 1851],
+    })
+
+    // Taking a capability back must be as easy as granting one, or the only
+    // safe move after a mistake is rotating a secret somebody else is holding.
+    await setKinds(cookie, credential.clientId, [27235])
+    const issued = (await (await tokenFor(credential.clientId, credential.secret)).json()) as {
+      allowed_kinds: number[]
+    }
+    expect(issued.allowed_kinds).toEqual([27235])
+  })
+
+  it('refuses a member', async () => {
+    const { cookie } = await signedInAs('notadmin@estiva.test', 'member')
+    const bot = await createRoleIdentity({ displayName: 'Not Yours' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'not-yours',
+      name: 'Not Yours',
+      allowedKinds: [27235],
+    })
+
+    /*
+      The property that matters most here. PEEK-145 settled that there is no
+      Folder boundary behind `allowed_kinds`, so this is the entire containment
+      for an agent — a member who could widen their own bot could grant
+      themselves the workspace.
+    */
+    expect((await setKinds(cookie, credential.clientId, [27235, 9, 1851])).status).toBe(403)
+
+    const issued = (await (await tokenFor(credential.clientId, credential.secret)).json()) as {
+      allowed_kinds: number[]
+    }
+    expect(issued.allowed_kinds).toEqual([27235])
+  })
+
+  it('refuses a credential that does not exist', async () => {
+    const { cookie } = await signedInAs('missing@estiva.test', 'admin')
+    expect((await setKinds(cookie, 'no-such-client', [27235])).status).toBe(404)
+  })
+})
