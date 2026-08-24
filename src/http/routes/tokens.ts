@@ -34,7 +34,9 @@ import { Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { config } from '../../config.js'
+import type { AuthTag } from '../../nostr/nip-oa.js'
 import { findAppPolicy } from '../../domain/apps.js'
+import { ownerAttestation } from '../../domain/attestation.js'
 import { recordAudit } from '../../domain/audit.js'
 import { redeemAuthorizationCode } from '../../domain/authorization.js'
 import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
@@ -114,7 +116,7 @@ const refreshGrantSchema = z.object({
 function tokenResponse(
   issued: { token: string; expiresIn: number; pubkey: string },
   allowedKinds: number[],
-  refreshToken?: string,
+  extra: { refreshToken?: string; ownerAttestation?: AuthTag } = {},
 ) {
   return {
     access_token: issued.token,
@@ -123,7 +125,8 @@ function tokenResponse(
     pubkey: issued.pubkey,
     issuer: config().ISSUER_URL,
     allowed_kinds: allowedKinds,
-    ...(refreshToken ? { refresh_token: refreshToken } : {}),
+    ...(extra.refreshToken ? { refresh_token: extra.refreshToken } : {}),
+    ...(extra.ownerAttestation ? { owner_attestation: extra.ownerAttestation } : {}),
   }
 }
 
@@ -341,7 +344,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, app.allowedKinds, refresh?.refreshToken))
+    return c.json(tokenResponse(issued, app.allowedKinds, { refreshToken: refresh?.refreshToken }))
   }
 
   /**
@@ -418,7 +421,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, app.allowedKinds, redemption.refreshToken))
+    return c.json(tokenResponse(issued, app.allowedKinds, { refreshToken: redemption.refreshToken }))
   }
 
   /**
@@ -459,6 +462,17 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     const issued = await issueToken({ pubkey: credential.pubkey, clientId: credential.clientId })
 
+    /**
+     * The NIP-OA owner attestation, on the one grant that can have an owner.
+     *
+     * Only a role identity is ownable — `users_owner_only_for_roles` in
+     * migration 008 — and this is the only grant that issues a token for one,
+     * so the other three would be asking a question whose answer is always
+     * "none". A workspace-owned role (`Relay Operator`) gets `undefined` here
+     * and the field is simply absent, which is the correct description of it.
+     */
+    const attestation = await ownerAttestation(credential.actsAsUserId)
+
     await recordAudit({
       actorType: 'app',
       // The identity acted for, not a person who acted — there is none. Recording
@@ -468,11 +482,21 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.issue',
       outcome: 'success',
       subjectPubkey: credential.pubkey,
-      detail: { expiresIn: issued.expiresIn, grant: 'client_credentials' },
+      detail: {
+        expiresIn: issued.expiresIn,
+        grant: 'client_credentials',
+        // Whether the bot left with a way to prove who steers it. Recorded
+        // because its absence is silent everywhere else: the token still
+        // works, the agent still publishes, and only the relay's
+        // `agent_owner_pubkey` staying null would ever show it.
+        ownerAttested: attestation !== undefined,
+      },
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, credential.allowedKinds))
+    return c.json(
+      tokenResponse(issued, credential.allowedKinds, { ownerAttestation: attestation }),
+    )
   }
 
   return routes
