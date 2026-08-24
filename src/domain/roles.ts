@@ -334,6 +334,96 @@ export async function setCredentialKinds(input: {
   return { clientId: input.clientId, from: row.allowed_kinds, to: input.allowedKinds }
 }
 
+/**
+ * What a role identity's credential is, minus the part that cannot be shown.
+ *
+ * The console has never displayed this. `listCredentialSummaries` reads
+ * `webauthn_credentials` — passkeys — so a bot's client id was visible exactly
+ * once, in the dialog that minted it, and after that lived only in whatever
+ * the person pasted it into. Reinstalling a Claude Desktop extension asks for
+ * it again, and there was nowhere to look.
+ *
+ * **The secret is not here and cannot be.** Only its SHA-256 is stored; there
+ * is no ciphertext to decrypt and no screen that could reveal it. Losing it
+ * means minting a new one, which is why `rotateBotSecret` exists.
+ *
+ * `allowedKinds` is included because re-minting requires restating it, and
+ * restating it from memory is how a ceiling gets silently narrowed — the
+ * failure `/sign` then reports as `kind_not_allowed` on a feature that worked
+ * yesterday (PEEK-172).
+ */
+export async function serviceCredentialFor(userId: string): Promise<{
+  clientId: string
+  name: string
+  allowedKinds: number[]
+  nip98UrlPrefixes: string[]
+  updatedAt: string
+} | null> {
+  const row = await queryOne<{
+    client_id: string
+    name: string
+    allowed_kinds: number[]
+    nip98_url_prefixes: string[]
+    updated_at: Date
+  }>(
+    `select client_id, name, allowed_kinds, nip98_url_prefixes, updated_at
+       from app_credentials where acts_as_user_id = $1 and status = 'active'`,
+    [userId],
+  )
+  if (!row) return null
+  return {
+    clientId: row.client_id,
+    name: row.name,
+    allowedKinds: row.allowed_kinds,
+    nip98UrlPrefixes: row.nip98_url_prefixes,
+    updatedAt: row.updated_at.toISOString(),
+  }
+}
+
+/**
+ * Give one of your own bots a new secret, and change nothing else.
+ *
+ * The alternative the card used to offer was "make another bot and stop this
+ * one", which costs the identity: a new pubkey, a new relay admission, a new
+ * name, and every message the old one wrote left behind under a bot that no
+ * longer exists. All of that to recover from closing a dialog too early.
+ *
+ * A rotation keeps the identity and replaces only the credential — same
+ * `client_id`, same pubkey, same admission, same history. What it does not keep
+ * is the old secret: anything still holding it stops working, which is the
+ * point when the reason for rotating is that somebody else may have it.
+ *
+ * `allowedKinds` is carried over rather than re-specified, because restating a
+ * ceiling from memory is how one gets silently narrowed.
+ */
+export async function rotateBotSecret(input: {
+  ownerUserId: string
+  botUserId: string
+}): Promise<IssuedServiceCredential> {
+  const bot = await queryOne<{
+    kind: string
+    status: string
+    owner_user_id: string | null
+    display_name: string | null
+  }>('select kind, status, owner_user_id, display_name from users where id = $1', [input.botUserId])
+  if (!bot) throw new RoleRefused('no_such_identity')
+  if (bot.kind !== 'role') throw new RoleRefused('not_a_role')
+  // Somebody else's bot is "no such", not a refusal that confirms it exists.
+  if (bot.owner_user_id !== input.ownerUserId) throw new RoleRefused('no_such_identity')
+  if (bot.status !== 'active') throw new RoleRefused('not_active')
+
+  const existing = await serviceCredentialFor(input.botUserId)
+  if (!existing) throw new RoleRefused('no_such_identity')
+
+  return issueServiceCredential({
+    userId: input.botUserId,
+    clientId: existing.clientId,
+    name: existing.name,
+    allowedKinds: existing.allowedKinds,
+    nip98UrlPrefixes: existing.nip98UrlPrefixes,
+  })
+}
+
 export interface ServiceCredential {
   clientId: string
   name: string

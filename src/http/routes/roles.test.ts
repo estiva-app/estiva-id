@@ -977,3 +977,114 @@ describe('changing what a credential may sign', () => {
     expect((await setKinds(cookie, 'no-such-client', [27235])).status).toBe(404)
   })
 })
+
+/**
+ * Seeing a client id, and replacing a secret without losing the bot.
+ *
+ * Found by reinstalling a Claude Desktop extension: it asks for the client id
+ * and the secret again, and the console showed neither. The client id is not a
+ * secret and was hidden anyway; the secret genuinely cannot be shown, which
+ * left "make another bot and stop this one" as the only recovery — and that
+ * costs a pubkey, a relay admission, a name and every message the old bot
+ * wrote.
+ */
+describe('recovering a bot you can no longer configure', () => {
+  const makeBot = (cookie: string, label: string) =>
+    app.request('/me/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ label }),
+    })
+
+  it('lists the client id, which is not a secret', async () => {
+    const { cookie } = await signedInAs('seeid@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Laptop')).json()) as { clientId: string }
+
+    const listed = (await (await app.request('/me/bots', { headers: { cookie } })).json()) as {
+      bots: { clientId: string | null }[]
+    }
+    expect(listed.bots[0]?.clientId).toBe(created.clientId)
+  })
+
+  it('never lists the secret', async () => {
+    const { cookie } = await signedInAs('nosecret@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Laptop')).json()) as { clientSecret: string }
+
+    const body = await (await app.request('/me/bots', { headers: { cookie } })).text()
+    /*
+      The property that must never regress. Only a SHA-256 is stored, so this
+      cannot leak by accident today — but a future "convenience" that kept the
+      plaintext would make this listing the place it escapes from.
+    */
+    expect(body).not.toContain(created.clientSecret)
+  })
+
+  it('gives a new secret and keeps the identity', async () => {
+    const { cookie } = await signedInAs('rotate@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Laptop')).json()) as {
+      bot: { userId: string; pubkey: string | null }
+      clientId: string
+      clientSecret: string
+    }
+
+    const rotated = (await (
+      await app.request(`/me/bots/${created.bot.userId}/secret`, {
+        method: 'POST',
+        headers: { cookie },
+      })
+    ).json()) as { clientId: string; clientSecret: string }
+
+    // Same identity, different secret — that is the whole point of rotating
+    // rather than replacing: the pubkey and its relay admission survive.
+    expect(rotated.clientId).toBe(created.clientId)
+    expect(rotated.clientSecret).not.toBe(created.clientSecret)
+
+    expect((await tokenFor(rotated.clientId, rotated.clientSecret)).status).toBe(200)
+    // And the old one is dead, which is the point when the reason to rotate is
+    // that somebody else may be holding it.
+    expect((await tokenFor(created.clientId, created.clientSecret)).status).toBe(401)
+  })
+
+  it('carries the ceiling over rather than resetting it', async () => {
+    const { cookie } = await signedInAs('keepkinds@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Laptop')).json()) as {
+      bot: { userId: string }
+      clientId: string
+    }
+
+    const rotated = (await (
+      await app.request(`/me/bots/${created.bot.userId}/secret`, {
+        method: 'POST',
+        headers: { cookie },
+      })
+    ).json()) as { clientId: string; clientSecret: string }
+
+    /*
+      Restating a ceiling from memory is how one gets silently narrowed — the
+      failure `/sign` later reports as `kind_not_allowed` on something that
+      worked yesterday (PEEK-172). Rotation reads it rather than asking.
+    */
+    const issued = (await (await tokenFor(rotated.clientId, rotated.clientSecret)).json()) as {
+      allowed_kinds: number[]
+    }
+    expect(issued.allowed_kinds).toEqual([27235])
+  })
+
+  it('refuses to rotate somebody else’s bot', async () => {
+    const owner = await signedInAs('mineonly@estiva.test', 'member')
+    const stranger = await signedInAs('notmine@estiva.test', 'member')
+    const created = (await (await makeBot(owner.cookie, 'Mine')).json()) as {
+      bot: { userId: string }
+      clientId: string
+      clientSecret: string
+    }
+
+    const response = await app.request(`/me/bots/${created.bot.userId}/secret`, {
+      method: 'POST',
+      headers: { cookie: stranger.cookie },
+    })
+    expect(response.status).toBe(404)
+    // And rotating did not happen, which is the half that would actually hurt.
+    expect((await tokenFor(created.clientId, created.clientSecret)).status).toBe(200)
+  })
+})
