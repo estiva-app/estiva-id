@@ -741,6 +741,50 @@ describe('a person making their own bot', () => {
     expect(issued.allowed_kinds).toEqual([27235])
   })
 
+  it('can actually mint NIP-98 for the relay, not merely hold the kind', async () => {
+    const { cookie } = await signedInAs('destinations@estiva.test', 'member')
+    const body = (await (await makeBot(cookie, 'Reader')).json()) as {
+      clientId: string
+      clientSecret: string
+    }
+    const issued = (await (await tokenFor(body.clientId, body.clientSecret)).json()) as {
+      access_token: string
+    }
+
+    /*
+      The hop every other assertion in this block stops one short of.
+
+      `allowed_kinds: [27235]` above is necessary and not sufficient: NIP-98 is
+      gated twice, once on the kind and again on the URL, ANDing the
+      credential's `nip98_url_prefixes` against the deployment allowlist. A bot
+      minted with an empty column passes the kind check and is then refused
+      every destination there is — so it takes a token, reports success, and
+      reads nothing.
+
+      That is what the first self-service bot did on production: three green
+      hops and `nip98_url_not_allowed` on the fourth. Asserting the token is
+      200, as the tests above do, cannot see it — the token was always 200.
+    */
+    const signed = await app.request('/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${issued.access_token}`,
+      },
+      body: JSON.stringify({
+        event: {
+          kind: 27235,
+          tags: [
+            ['u', 'http://relay.test/'],
+            ['method', 'GET'],
+          ],
+          content: '',
+        },
+      }),
+    })
+    expect(signed.status).toBe(200)
+  })
+
   it('cannot be given a name that hides whose it is', async () => {
     const { cookie } = await signedInAs('naming@estiva.test', 'member')
     const response = await makeBot(cookie, 'Support')

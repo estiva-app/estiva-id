@@ -25,6 +25,7 @@
  * secret in a bundle is not a secret.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { config } from '../config.js'
 import { query, queryOne, withTransaction } from '../db/pool.js'
 import { getActivePubkey } from './keys.js'
 import { saveProfile } from './profile.js'
@@ -245,6 +246,25 @@ export async function createOwnBot(input: {
     name: displayName,
     // Read-only by construction. See above.
     allowedKinds: [27235],
+    /*
+      The deployment's own destinations, exactly as the admin route defaults
+      them — and the reason this line exists rather than being left to the
+      parameter's fail-closed default.
+
+      `allowedKinds: [27235]` above buys nothing on its own: kind 27235 is
+      NIP-98, and `validateSignPolicy` gates NIP-98 a second time on the URL
+      being reached, ANDing this column with the deployment allowlist. Minted
+      empty, the credential passes the kind check and is then refused
+      `nip98_url_not_allowed` for every URL there is — so it authenticates,
+      reports success, and reads nothing. That is PEEK-133 again, which is what
+      put the parameter on `issueServiceCredential` in the first place; a
+      runtime minting path added afterwards reintroduced it.
+
+      Widening is still bounded: `validateSignPolicy` applies the deployment
+      bound regardless, so the worst this can grant is a destination the
+      deployment already permits.
+    */
+    nip98UrlPrefixes: [...config().SIGN_NIP98_ALLOWED_URL_PREFIXES],
   })
 
   return { ...credential, botUserId: bot.id, displayName }
