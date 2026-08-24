@@ -68,7 +68,8 @@ export function assertValidConditions(conditions: string): void {
       throw new Error(`NIP-OA conditions has an empty clause: ${JSON.stringify(conditions)}`)
     }
     const match = /^(kind=|created_at<|created_at>)(\d+)$/.exec(clause)
-    if (!match) throw new Error(`NIP-OA conditions has an unsupported clause: ${JSON.stringify(clause)}`)
+    if (!match)
+      throw new Error(`NIP-OA conditions has an unsupported clause: ${JSON.stringify(clause)}`)
 
     const label = match[1] as string
     const digits = match[2] as string
@@ -80,7 +81,9 @@ export function assertValidConditions(conditions: string): void {
     }
     const max = label === 'kind=' ? 65535 : 4294967295
     if (Number(digits) > max) {
-      throw new Error(`NIP-OA conditions value out of range for ${label}: ${JSON.stringify(clause)}`)
+      throw new Error(
+        `NIP-OA conditions value out of range for ${label}: ${JSON.stringify(clause)}`,
+      )
     }
   }
 }

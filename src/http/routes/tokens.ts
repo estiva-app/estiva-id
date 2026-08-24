@@ -34,7 +34,6 @@ import { Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { config } from '../../config.js'
-import type { AuthTag } from '../../nostr/nip-oa.js'
 import { findAppPolicy } from '../../domain/apps.js'
 import { ownerAttestation } from '../../domain/attestation.js'
 import { recordAudit } from '../../domain/audit.js'
@@ -46,6 +45,7 @@ import { authenticateServiceCredential } from '../../domain/roles.js'
 import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden, unauthenticated } from '../../errors.js'
+import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
 
@@ -421,7 +421,9 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, app.allowedKinds, { refreshToken: redemption.refreshToken }))
+    return c.json(
+      tokenResponse(issued, app.allowedKinds, { refreshToken: redemption.refreshToken }),
+    )
   }
 
   /**
@@ -494,9 +496,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(
-      tokenResponse(issued, credential.allowedKinds, { ownerAttestation: attestation }),
-    )
+    return c.json(tokenResponse(issued, credential.allowedKinds, { ownerAttestation: attestation }))
   }
 
   return routes

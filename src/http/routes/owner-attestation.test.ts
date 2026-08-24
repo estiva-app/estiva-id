@@ -14,10 +14,10 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { closePool } from '../../db/pool.js'
+import { ownerAttestation } from '../../domain/attestation.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { offboardPerson } from '../../domain/offboarding.js'
 import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
-import { ownerAttestation } from '../../domain/attestation.js'
 import { createUserWithKey, setUserStatus } from '../../domain/users.js'
 import { verifyAuthTag } from '../../nostr/nip-oa.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
@@ -41,7 +41,10 @@ interface IssuedToken {
 /** A person, a bot they own, and a credential for it — the production shape. */
 async function ownedBot(email: string, clientId: string) {
   const owner = await createUserWithKey({ displayName: 'Miky', email, kind: 'human' })
-  const bot = await createRoleIdentity({ displayName: 'Claude (steered by Miky)', ownerUserId: owner.id })
+  const bot = await createRoleIdentity({
+    displayName: 'Claude (steered by Miky)',
+    ownerUserId: owner.id,
+  })
   const credential = await issueServiceCredential({
     userId: bot.id,
     clientId,
@@ -65,7 +68,9 @@ describe('a bot that belongs to somebody', () => {
   it('is handed an attestation its owner signed', async () => {
     const { owner, credential } = await ownedBot('owned@estiva.test', 'claude-owned')
 
-    const issued = (await (await tokenFor(credential.clientId, credential.secret)).json()) as IssuedToken
+    const issued = (await (
+      await tokenFor(credential.clientId, credential.secret)
+    ).json()) as IssuedToken
     expect(issued.owner_attestation).toBeDefined()
 
     /*
@@ -81,7 +86,9 @@ describe('a bot that belongs to somebody', () => {
 
   it('does not attest the bot to itself', async () => {
     const { credential } = await ownedBot('self@estiva.test', 'claude-self')
-    const issued = (await (await tokenFor(credential.clientId, credential.secret)).json()) as IssuedToken
+    const issued = (await (
+      await tokenFor(credential.clientId, credential.secret)
+    ).json()) as IssuedToken
     // The relay rejects owner == agent outright, so an attestation naming the
     // bot as its own owner would be worse than none: it would look wired up.
     expect(issued.owner_attestation).toBeDefined()
@@ -92,8 +99,12 @@ describe('a bot that belongs to somebody', () => {
     const first = await ownedBot('one@estiva.test', 'claude-one')
     const second = await ownedBot('two@estiva.test', 'claude-two')
 
-    const a = (await (await tokenFor(first.credential.clientId, first.credential.secret)).json()) as IssuedToken
-    const b = (await (await tokenFor(second.credential.clientId, second.credential.secret)).json()) as IssuedToken
+    const a = (await (
+      await tokenFor(first.credential.clientId, first.credential.secret)
+    ).json()) as IssuedToken
+    const b = (await (
+      await tokenFor(second.credential.clientId, second.credential.secret)
+    ).json()) as IssuedToken
 
     // Each must have got one, or the cross-check below throws for the boring
     // reason that there is nothing to check.
@@ -109,7 +120,9 @@ describe('a bot that belongs to somebody', () => {
 
   it('uses empty conditions, so it constrains nothing', async () => {
     const { credential } = await ownedBot('cond@estiva.test', 'claude-cond')
-    const issued = (await (await tokenFor(credential.clientId, credential.secret)).json()) as IssuedToken
+    const issued = (await (
+      await tokenFor(credential.clientId, credential.secret)
+    ).json()) as IssuedToken
     // The relationship recorded is "who steers this agent". It does not vary by
     // kind, and Buzz never re-reads the conditions after verifying.
     expect(issued.owner_attestation).toBeDefined()

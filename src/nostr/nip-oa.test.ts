@@ -105,12 +105,16 @@ describe('computeAuthTag', () => {
 })
 
 describe('conditions', () => {
-  it.each(['', 'kind=0', 'kind=65535', 'created_at<0', 'created_at>4294967295', 'kind=9&created_at<1713957000'])(
-    'accepts %j',
-    (conditions) => {
-      expect(() => assertValidConditions(conditions)).not.toThrow()
-    },
-  )
+  it.each([
+    '',
+    'kind=0',
+    'kind=65535',
+    'created_at<0',
+    'created_at>4294967295',
+    'kind=9&created_at<1713957000',
+  ])('accepts %j', (conditions) => {
+    expect(() => assertValidConditions(conditions)).not.toThrow()
+  })
 
   /**
    * Every one of these is refused by the relay *after* it has checked the
@@ -159,7 +163,11 @@ describe('verifyAuthTag structural checks', () => {
 
   it('refuses malformed owner and signature hex', () => {
     const [, , conditions, sig] = good()
-    expect(() => verifyAuthTag(['auth', 'nothex', conditions, sig], agentPk)).toThrow(/owner pubkey/)
-    expect(() => verifyAuthTag(['auth', ownerPk, conditions, 'short'], agentPk)).toThrow(/signature/)
+    expect(() => verifyAuthTag(['auth', 'nothex', conditions, sig], agentPk)).toThrow(
+      /owner pubkey/,
+    )
+    expect(() => verifyAuthTag(['auth', ownerPk, conditions, 'short'], agentPk)).toThrow(
+      /signature/,
+    )
   })
 })
