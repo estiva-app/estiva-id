@@ -19,7 +19,11 @@ import { closePool, query, queryOne } from '../../db/pool.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { offboardPerson } from '../../domain/offboarding.js'
 import { createRecovery } from '../../domain/recovery.js'
-import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
+import {
+  MAX_BOTS_PER_PERSON,
+  createRoleIdentity,
+  issueServiceCredential,
+} from '../../domain/roles.js'
 import { createSession } from '../../domain/sessions.js'
 import { createUserWithKey, setUserStatus } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
@@ -683,5 +687,108 @@ describe('offboarding a person and their bots', () => {
     await expect(
       createRoleIdentity({ displayName: 'Child Bot', ownerUserId: parent.id }),
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * Making a bot for yourself (PEEK-164).
+ *
+ * The bottleneck was real: onboarding one more person to the agent needed an
+ * admin for three separate steps, and PEEK-163 existed only to make one of them
+ * possible at all.
+ *
+ * What is asserted here is not that it works — it is the three properties that
+ * make letting a non-admin do it safe, because each is one edit away from being
+ * untrue and none of them fails loudly.
+ */
+describe('a person making their own bot', () => {
+  const makeBot = (cookie: string, label: string) =>
+    app.request('/me/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ label }),
+    })
+
+  it('needs no admin', async () => {
+    const { cookie } = await signedInAs('selfserve@estiva.test', 'member')
+    const response = await makeBot(cookie, 'Desktop')
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as {
+      clientId: string
+      clientSecret: string
+      bot: { displayName: string }
+    }
+    // Usable immediately: the secret is returned once and works.
+    const token = await tokenFor(body.clientId, body.clientSecret)
+    expect(token.status).toBe(200)
+  })
+
+  it('is read-only, whatever it asks for', async () => {
+    const { cookie } = await signedInAs('readonly@estiva.test', 'member')
+    const response = await makeBot(cookie, 'Reader')
+    const body = (await response.json()) as { clientId: string; clientSecret: string }
+
+    const token = await tokenFor(body.clientId, body.clientSecret)
+    const issued = (await token.json()) as { allowed_kinds: number[] }
+    /*
+      27235 is NIP-98 HTTP auth and nothing else, so it can authenticate and
+      read and cannot publish. This is what keeps "a bot may never exceed its
+      owner" true by construction rather than by review — and asserting the
+      exact list matters, since an extra kind here is an escalation any member
+      could grant themselves.
+    */
+    expect(issued.allowed_kinds).toEqual([27235])
+  })
+
+  it('cannot be given a name that hides whose it is', async () => {
+    const { cookie } = await signedInAs('naming@estiva.test', 'member')
+    const response = await makeBot(cookie, 'Support')
+    const body = (await response.json()) as { bot: { displayName: string } }
+    /*
+      Composed rather than accepted. A message from a bot renders exactly like a
+      colleague in a Peek conversation (PEEK-171), so a person naming their own
+      "Support" is one careless moment from a chat nobody can attribute.
+    */
+    expect(body.bot.displayName).toContain('steered by')
+    expect(body.bot.displayName).not.toBe('Support')
+  })
+
+  it('dies with its owner', async () => {
+    const owner = await signedInAs('dies@estiva.test', 'member')
+    const response = await makeBot(owner.cookie, 'Doomed')
+    const body = (await response.json()) as { clientId: string; clientSecret: string }
+    expect((await tokenFor(body.clientId, body.clientSecret)).status).toBe(200)
+
+    await offboardPerson(owner.user.id)
+
+    // The property that made self-service safe to offer at all.
+    expect((await tokenFor(body.clientId, body.clientSecret)).status).toBe(401)
+  })
+
+  it('gives each one a distinct client id', async () => {
+    const { cookie } = await signedInAs('distinct@estiva.test', 'member')
+    const a = (await (await makeBot(cookie, 'Laptop')).json()) as { clientId: string }
+    const b = (await (await makeBot(cookie, 'Laptop')).json()) as { clientId: string }
+    // Same label twice is the ordinary case, and `client_id` is globally unique.
+    expect(a.clientId).not.toBe(b.clientId)
+  })
+
+  it('stops at a limit rather than letting a loop make thousands', async () => {
+    const { cookie } = await signedInAs('limit@estiva.test', 'member')
+    for (let i = 0; i < MAX_BOTS_PER_PERSON; i++) {
+      expect((await makeBot(cookie, `Bot ${i}`)).status).toBe(200)
+    }
+    const overflow = await makeBot(cookie, 'One too many')
+    expect(overflow.status).toBe(409)
+  })
+
+  it('refuses somebody with no session', async () => {
+    const response = await app.request('/me/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'Nope' }),
+    })
+    expect(response.status).toBe(401)
   })
 })
