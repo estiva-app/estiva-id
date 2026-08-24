@@ -338,6 +338,21 @@ export const createOwnBot = (label: string) =>
     admissionError?: string | null
   }>('/me/bots', { method: 'POST', body: JSON.stringify({ label }) })
 
+/**
+ * Stop one of your bots, permanently.
+ *
+ * **Retire, not delete**, and the wording is deliberate after PEEK-170: it can
+ * never mint another token and its key stops being admitted to the relay, and
+ * everything it already wrote stays attributed to it — the same way a person's
+ * messages outlast their account. Naming it "delete" would promise a removal
+ * that does not happen.
+ */
+export const retireOwnBot = (botUserId: string) =>
+  request<{
+    retired: { userId: string; displayName: string | null }
+    relayAdmission: unknown
+  }>(`/me/bots/${encodeURIComponent(botUserId)}`, { method: 'DELETE' })
+
 // --- The audit trail (PEEK-69) ----------------------------------------------
 
 export interface AuditEntry {
