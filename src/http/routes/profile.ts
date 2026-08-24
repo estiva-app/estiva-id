@@ -12,6 +12,7 @@ import { config } from '../../config.js'
 import { recordAudit } from '../../domain/audit.js'
 import { AvatarRejected, MAX_AVATAR_BYTES, setAvatar } from '../../domain/avatar.js'
 import { getActivePubkey } from '../../domain/keys.js'
+import { offboardPerson } from '../../domain/offboarding.js'
 import {
   HandleTakenError,
   InvalidHandleError,
@@ -27,6 +28,7 @@ import {
   TooManyBots,
   botsOwnedBy,
   createOwnBot,
+  retireOwnBot,
 } from '../../domain/roles.js'
 import { findUserById } from '../../domain/users.js'
 import {
@@ -199,6 +201,50 @@ export function profileRoutes(): Hono<AppEnv> {
       clientSecret: created.secret,
       admitted: admission.ok,
       ...(admission.ok ? {} : { admissionError: admission.reason ?? null }),
+    })
+  })
+
+  /**
+   * Stop one of your own bots (PEEK-164).
+   *
+   * **`retire`, not `delete`.** PEEK-170 was a Delete that removed a
+   * conversation locally while every message in it stayed readable on the relay
+   * — somebody believed a thing was gone and it was not. The lesson generalises:
+   * do not name an action for an outcome it does not produce.
+   *
+   * What this produces: the bot can never mint another token, and its key stops
+   * being admitted to the relay. What it does not: remove anything the bot
+   * already wrote, which stays attributed to it exactly as a person's messages
+   * outlast their account.
+   *
+   * Reuses `offboardPerson` rather than reimplementing it, so a bot retired here
+   * gets the same four steps a person does — including the relay half, which is
+   * the one that would otherwise survive.
+   */
+  routes.delete('/me/bots/:id', requireSession, async (c) => {
+    const { userId } = c.get('session')
+
+    let bot: Awaited<ReturnType<typeof retireOwnBot>>
+    try {
+      bot = await retireOwnBot({ ownerUserId: userId, botUserId: c.req.param('id') })
+    } catch (error) {
+      if (error instanceof RoleRefused) {
+        if (error.reason === 'no_such_identity') throw notFound('No such bot')
+        throw conflict(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+
+    const result = await offboardPerson(c.req.param('id'), {
+      actorUserId: userId,
+      requestId: c.get('requestId'),
+    })
+
+    return c.json({
+      retired: { userId: result.userId, displayName: bot.displayName },
+      // Reported rather than assumed, the same as everywhere else here: a key
+      // still admitted is a bot that can still read if it ever gets a token.
+      relayAdmission: result.relayAdmission,
     })
   })
 

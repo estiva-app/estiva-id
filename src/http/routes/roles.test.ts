@@ -792,3 +792,99 @@ describe('a person making their own bot', () => {
     expect(response.status).toBe(401)
   })
 })
+
+/**
+ * Stopping one of your own bots (PEEK-164).
+ *
+ * `retire`, not `delete`: PEEK-170 was a Delete that removed a conversation
+ * locally while every message in it stayed readable, so somebody believed a
+ * thing was gone and it was not. What this produces is that the bot can never
+ * mint another token; what it does not is remove anything the bot already
+ * wrote.
+ */
+describe('stopping your own bot', () => {
+  const makeBot = (cookie: string, label: string) =>
+    app.request('/me/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ label }),
+    })
+
+  const stop = (cookie: string, id: string) =>
+    app.request(`/me/bots/${id}`, { method: 'DELETE', headers: { cookie } })
+
+  it('stops it minting tokens', async () => {
+    const { cookie } = await signedInAs('retire@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Doomed')).json()) as {
+      bot: { userId: string }
+      clientId: string
+      clientSecret: string
+    }
+    expect((await tokenFor(created.clientId, created.clientSecret)).status).toBe(200)
+
+    expect((await stop(cookie, created.bot.userId)).status).toBe(200)
+
+    // The property, asserted through the grant rather than a status column.
+    expect((await tokenFor(created.clientId, created.clientSecret)).status).toBe(401)
+  })
+
+  it('drops it from your list, so the limit frees up', async () => {
+    const { cookie } = await signedInAs('freeup@estiva.test', 'member')
+    const created = (await (await makeBot(cookie, 'Temp')).json()) as { bot: { userId: string } }
+
+    await stop(cookie, created.bot.userId)
+
+    const listed = (await (await app.request('/me/bots', { headers: { cookie } })).json()) as {
+      bots: unknown[]
+    }
+    expect(listed.bots).toHaveLength(0)
+  })
+
+  /*
+    The property this route must not lose. Anything else here is a convenience;
+    this is the one that would let one member switch off another's tooling.
+  */
+  it('refuses somebody else’s bot', async () => {
+    const owner = await signedInAs('mine@estiva.test', 'member')
+    const stranger = await signedInAs('stranger@estiva.test', 'member')
+    const created = (await (await makeBot(owner.cookie, 'Mine')).json()) as {
+      bot: { userId: string }
+      clientId: string
+      clientSecret: string
+    }
+
+    // 404 rather than 403: somebody poking at ids should not learn which exist.
+    expect((await stop(stranger.cookie, created.bot.userId)).status).toBe(404)
+
+    // And it still works, which is the part that would actually hurt.
+    expect((await tokenFor(created.clientId, created.clientSecret)).status).toBe(200)
+  })
+
+  it('refuses a workspace-owned role, even for an admin', async () => {
+    const admin = await signedInAs('adminretire@estiva.test', 'admin')
+    const orgBot = await createRoleIdentity({ displayName: 'Workspace Bot' })
+    const credential = await issueServiceCredential({
+      userId: orgBot.id,
+      clientId: 'ws-bot-retire',
+      name: 'Workspace Bot',
+      allowedKinds: [27235],
+    })
+
+    /*
+      This route is "your bots", and an unowned role is nobody's. Offboarding
+      the relay operator through a self-service endpoint is exactly the shape of
+      mistake that takes a workspace down.
+    */
+    expect((await stop(admin.cookie, orgBot.id)).status).toBe(404)
+    expect((await tokenFor(credential.clientId, credential.secret)).status).toBe(200)
+  })
+
+  it('refuses without a session', async () => {
+    const owner = await signedInAs('nosession@estiva.test', 'member')
+    const created = (await (await makeBot(owner.cookie, 'Safe')).json()) as {
+      bot: { userId: string }
+    }
+    const response = await app.request(`/me/bots/${created.bot.userId}`, { method: 'DELETE' })
+    expect(response.status).toBe(401)
+  })
+})
