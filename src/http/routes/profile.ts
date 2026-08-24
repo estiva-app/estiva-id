@@ -29,6 +29,8 @@ import {
   botsOwnedBy,
   createOwnBot,
   retireOwnBot,
+  rotateBotSecret,
+  serviceCredentialFor,
 } from '../../domain/roles.js'
 import { findUserById } from '../../domain/users.js'
 import {
@@ -250,7 +252,58 @@ export function profileRoutes(): Hono<AppEnv> {
 
   routes.get('/me/bots', requireSession, async (c) => {
     const { userId } = c.get('session')
-    return c.json({ bots: await botsOwnedBy(userId), limit: MAX_BOTS_PER_PERSON })
+    const bots = await botsOwnedBy(userId)
+    /*
+      With the client id, which the card could not show before. Half of what a
+      person needs to configure a tool is not a secret, and hiding it with the
+      half that is meant reinstalling an extension had nowhere to look.
+    */
+    const withCredentials = await Promise.all(
+      bots.map(async (bot) => ({
+        ...bot,
+        clientId: (await serviceCredentialFor(bot.id))?.clientId ?? null,
+      })),
+    )
+    return c.json({ bots: withCredentials, limit: MAX_BOTS_PER_PERSON })
+  })
+
+  /**
+   * Give one of your bots a new secret.
+   *
+   * The card used to say "make another bot and stop this one", which costs the
+   * identity — a new pubkey, a new relay admission, a new name, and every
+   * message the old one wrote stranded under a bot that no longer exists — all
+   * to recover from closing a dialog too early.
+   *
+   * This keeps everything except the secret. Anything still holding the old one
+   * stops working, which is the point when the reason for rotating is that
+   * somebody else may have it.
+   */
+  routes.post('/me/bots/:id/secret', requireSession, async (c) => {
+    const { userId } = c.get('session')
+
+    let rotated: Awaited<ReturnType<typeof rotateBotSecret>>
+    try {
+      rotated = await rotateBotSecret({ ownerUserId: userId, botUserId: c.req.param('id') })
+    } catch (error) {
+      if (error instanceof RoleRefused) {
+        if (error.reason === 'no_such_identity') throw notFound('No such bot')
+        throw conflict(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: userId,
+      action: 'credential.rotate',
+      outcome: 'success',
+      detail: { subjectUserId: c.req.param('id'), clientId: rotated.clientId, selfService: true },
+      requestId: c.get('requestId'),
+    })
+
+    // Shown once, exactly like minting. Only the hash is stored.
+    return c.json({ clientId: rotated.clientId, clientSecret: rotated.secret })
   })
 
   /**

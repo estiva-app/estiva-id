@@ -36,6 +36,7 @@ import {
   type OffboardResult,
   type Person,
   type ReinstateResult,
+  type ServiceCredentialView,
   admitToRelay,
   createInvite,
   createRoleIdentity,
@@ -553,6 +554,7 @@ type DetailState =
       person: Person
       credentials: Credential[]
       unknownReason: AdmissionUnknownReason | null
+      serviceCredential: ServiceCredentialView | null
     }
 
 export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) {
@@ -560,8 +562,14 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
 
   const load = useCallback(async () => {
     try {
-      const { person, credentials, admissionUnknownReason } = await getPerson(id)
-      setState({ kind: 'ready', person, credentials, unknownReason: admissionUnknownReason })
+      const { person, credentials, admissionUnknownReason, serviceCredential } = await getPerson(id)
+      setState({
+        kind: 'ready',
+        person,
+        credentials,
+        unknownReason: admissionUnknownReason,
+        serviceCredential,
+      })
     } catch (error) {
       setState({
         kind: 'error',
@@ -589,7 +597,7 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
     )
   }
 
-  const { person, credentials, unknownReason } = state
+  const { person, credentials, unknownReason, serviceCredential } = state
   const enrolment = ENROLMENT[person.enrolment]
   const admission = ADMISSION[person.admission]
 
@@ -708,7 +716,7 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
         )}
       </section>
 
-      <CredentialCard person={person} />
+      <CredentialCard person={person} existing={serviceCredential} />
 
       <AdmitCard
         person={person}
@@ -788,11 +796,22 @@ export function AdminPerson({ id, onBack }: { id: string; onBack: () => void }) 
  * re-minted rather than looked up, and re-minting replaces the old one rather
  * than leaving two live.
  */
-function CredentialCard({ person }: { person: Person }) {
+function CredentialCard({
+  person,
+  existing,
+}: { person: Person; existing: ServiceCredentialView | null }) {
+  const [copiedId, setCopiedId] = useState(false)
   const [issued, setIssued] = useState<{ clientId: string; clientSecret: string } | null>(null)
-  const [clientId, setClientId] = useState('')
-  const [kinds, setKinds] = useState('')
-  const [prefixes, setPrefixes] = useState('')
+  /*
+    Pre-filled from the live credential, and that is a correctness fix rather
+    than a convenience. Re-minting requires restating `allowedKinds`, and an
+    empty box invites restating them from memory — which silently narrows the
+    ceiling and surfaces later as `kind_not_allowed` on a feature that worked
+    yesterday. PEEK-172 has the list of times that has happened.
+  */
+  const [clientId, setClientId] = useState(existing?.clientId ?? '')
+  const [kinds, setKinds] = useState(existing?.allowedKinds.join(', ') ?? '')
+  const [prefixes, setPrefixes] = useState(existing?.nip98UrlPrefixes.join(', ') ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -837,6 +856,31 @@ function CredentialCard({ person }: { person: Person }) {
         A server-side app exchanges this for a short-lived token and signs as this identity. It is{' '}
         <strong>not for browser apps</strong> — a secret in a bundle is not a secret.
       </p>
+
+      {/*
+        The half that is not a secret, shown because half of what configures a
+        tool is a client id and hiding it with the secret meant a reinstall had
+        nowhere to look.
+      */}
+      {existing && (
+        <dl className="facts">
+          <dt>Client id</dt>
+          <dd className="mono">
+            {existing.clientId}{' '}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                void navigator.clipboard.writeText(existing.clientId).then(() => setCopiedId(true))
+              }}
+            >
+              {copiedId ? 'Copied' : 'Copy'}
+            </button>
+          </dd>
+          <dt>May sign</dt>
+          <dd className="mono">{existing.allowedKinds.join(', ')}</dd>
+        </dl>
+      )}
 
       {issued ? (
         <>

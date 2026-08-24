@@ -42,6 +42,7 @@ import {
   createRoleIdentity,
   issueServiceCredential,
   renameRoleIdentity,
+  serviceCredentialFor,
   setCredentialKinds,
 } from '../../domain/roles.js'
 import { RoleChangeRefused, setUserRole } from '../../domain/users.js'
@@ -152,6 +153,13 @@ export function adminRoutes(): Hono<AppEnv> {
     return c.json({
       person,
       credentials: await listCredentialSummaries(person.id),
+      /*
+        The bot's own credential, minus the secret. Never shown before — the
+        client id was visible once, in the dialog that minted it, and after that
+        only wherever somebody had pasted it. Reinstalling an extension asks for
+        it again and there was nowhere to look.
+      */
+      serviceCredential: await serviceCredentialFor(person.id),
       // Same field as the list, for the same reason: a person whose admission
       // reads `unknown` deserves to be told whether that is about them or about
       // the workspace's ability to ask at all (PEEK-102).

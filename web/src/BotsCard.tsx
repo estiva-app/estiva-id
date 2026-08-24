@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ApiError, type OwnBot, createOwnBot, retireOwnBot } from './api'
+import { ApiError, type OwnBot, createOwnBot, retireOwnBot, rotateBotSecret } from './api'
 
 /**
  * The bots you made for yourself (PEEK-164).
@@ -48,6 +48,10 @@ export function BotsCard({
    * mis-click costs setting the tool up again from scratch.
    */
   const [confirming, setConfirming] = useState<string | null>(null)
+  /** Which bot is mid-rotation, so its row can say so. */
+  const [rotating, setRotating] = useState<string | null>(null)
+  /** Which client id was just copied, so the button can say so. */
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   /**
    * The one that was just made, held only in this component's state.
    *
@@ -93,6 +97,35 @@ export function BotsCard({
     }
   }
 
+  /**
+   * A new secret, keeping the bot.
+   *
+   * The card used to say "make another bot and stop this one", which is a real
+   * cost: a new pubkey, a new relay admission, a new name, and every message
+   * the old one wrote stranded under a bot that no longer exists — all to
+   * recover from closing this dialog too early, which is easy to do because it
+   * is the only time the secret is ever visible.
+   */
+  async function rotate(bot: OwnBot) {
+    setRotating(bot.id)
+    setError(null)
+    setCopied(false)
+    try {
+      const next = await rotateBotSecret(bot.id)
+      setIssued({
+        displayName: bot.displayName ?? next.clientId,
+        clientId: next.clientId,
+        clientSecret: next.clientSecret,
+        admitted: true,
+        admissionError: null,
+      })
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not make a new secret.')
+    } finally {
+      setRotating(null)
+    }
+  }
+
   async function retire(bot: OwnBot) {
     setRetiring(bot.id)
     setError(null)
@@ -131,7 +164,8 @@ export function BotsCard({
           */}
           <div className="notice">
             <strong>Copy the secret now.</strong> Only its hash is stored, so it cannot be shown
-            again — if you lose it, make another bot and stop this one.
+            again. If you lose it, <strong>New secret</strong> gives this bot a fresh one and keeps
+            everything else — the same id, the same name, the same history.
           </div>
           <dl className="facts">
             <dt>Name</dt>
@@ -177,6 +211,27 @@ export function BotsCard({
               {bots.map((bot) => (
                 <li key={bot.id} className="row">
                   <span>{bot.displayName ?? bot.id}</span>
+                  {/*
+                    Shown, because it is not a secret and half of what
+                    configures a tool. Hiding it alongside the secret meant a
+                    reinstall had nowhere to look it up.
+                  */}
+                  {bot.clientId && (
+                    <>
+                      <span className="mono card-note">{bot.clientId}</span>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => {
+                          const id = bot.clientId
+                          if (!id) return
+                          void navigator.clipboard.writeText(id).then(() => setCopiedId(bot.id))
+                        }}
+                      >
+                        {copiedId === bot.id ? 'Copied' : 'Copy id'}
+                      </button>
+                    </>
+                  )}
                   {confirming === bot.id ? (
                     <>
                       {/*
@@ -203,9 +258,21 @@ export function BotsCard({
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="link" onClick={() => setConfirming(bot.id)}>
-                      Stop
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => {
+                          void rotate(bot)
+                        }}
+                        disabled={rotating === bot.id}
+                      >
+                        {rotating === bot.id ? 'Working…' : 'New secret'}
+                      </button>
+                      <button type="button" className="link" onClick={() => setConfirming(bot.id)}>
+                        Stop
+                      </button>
+                    </>
                   )}
                 </li>
               ))}

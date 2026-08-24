@@ -141,6 +141,7 @@ export const getPerson = (id: string) =>
   request<{
     person: Person
     credentials: Credential[]
+    serviceCredential: ServiceCredentialView | null
     admissionUnknownReason: AdmissionUnknownReason | null
   }>(`/admin/people/${encodeURIComponent(id)}`)
 
@@ -305,6 +306,16 @@ export const issueServiceCredential = (
 export interface OwnBot {
   id: string
   displayName: string | null
+  /** Half of what configures a tool, and not a secret — so it is shown. */
+  clientId?: string | null
+}
+
+export interface ServiceCredentialView {
+  clientId: string
+  name: string
+  allowedKinds: number[]
+  nip98UrlPrefixes: string[]
+  updatedAt: string
 }
 
 /**
@@ -347,6 +358,20 @@ export const createOwnBot = (label: string) =>
  * messages outlast their account. Naming it "delete" would promise a removal
  * that does not happen.
  */
+/**
+ * A new secret for a bot you own, keeping everything else.
+ *
+ * The alternative was "make another and stop this one", which costs the
+ * identity: new pubkey, new relay admission, new name, and every message the
+ * old one wrote stranded under a bot that no longer exists. The secret comes
+ * back **once**, exactly like minting.
+ */
+export const rotateBotSecret = (botUserId: string) =>
+  request<{ clientId: string; clientSecret: string }>(
+    `/me/bots/${encodeURIComponent(botUserId)}/secret`,
+    { method: 'POST' },
+  )
+
 export const retireOwnBot = (botUserId: string) =>
   request<{
     retired: { userId: string; displayName: string | null }
