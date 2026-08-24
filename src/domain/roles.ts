@@ -32,6 +32,13 @@ import { type UserWithPubkey, createUserWithKey } from './users.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
 
+export class TooManyBots extends Error {
+  constructor(readonly limit: number) {
+    super(`You already have ${limit} bots. Delete one before making another.`)
+    this.name = 'TooManyBots'
+  }
+}
+
 export class RoleRefused extends Error {
   constructor(readonly reason: 'no_such_identity' | 'not_a_role' | 'not_active' | 'name_taken') {
     super(
@@ -152,6 +159,95 @@ export async function botsOwnedBy(
     [ownerUserId],
   )
   return rows.rows.map((row) => ({ id: row.id, displayName: row.display_name }))
+}
+
+/**
+ * How many bots one person may make for themselves.
+ *
+ * A limit rather than none, because self-service creation mints a relay member
+ * and an identity that has to be offboarded later, and neither is free. Five is
+ * enough for "one per machine, one for an experiment" and low enough that a
+ * runaway script is a support conversation rather than a cleanup.
+ */
+export const MAX_BOTS_PER_PERSON = 5
+
+/**
+ * A globally unique client id that still says what it is.
+ *
+ * The ticket's own worry: `claude-<handle>` "collides the day two workspaces
+ * share a name". A readable prefix plus random suffix keeps the log legible
+ * without depending on names being unique anywhere.
+ */
+function botClientId(label: string): string {
+  const slug =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 24) || 'bot'
+  // The column's own shape rule: lowercase, digits, dashes, not dash-initial.
+  const prefixed = /^[a-z0-9]/.test(slug) ? slug : `bot-${slug}`
+  return `${prefixed}-${randomBytes(3).toString('hex')}`
+}
+
+/**
+ * Make a bot for yourself — no admin, and no way to give it more than you have.
+ *
+ * The bottleneck this removes is real: onboarding one more person to the agent
+ * needed an admin for three separate steps, and PEEK-163 existed only to make
+ * one of them possible at all.
+ *
+ * Three properties hold it in place, and each is a decision rather than an
+ * omission:
+ *
+ * **It is read-only.** `allowedKinds: [27235]` is NIP-98 HTTP auth and nothing
+ * else, so the credential can authenticate and read and cannot publish anything
+ * — refused by `/sign` server-side rather than promised. Widening it stays an
+ * admin action, which is what keeps "a bot may never exceed its owner" true by
+ * construction instead of by review.
+ *
+ * **Its name cannot lie.** Composed here rather than taken from the caller, so
+ * every bot says whose it is. A message in a Peek conversation renders exactly
+ * like a colleague (PEEK-171), and a person naming their own bot "Support" is
+ * one careless moment away from a chat nobody can attribute.
+ *
+ * **It dies with its owner.** `owner_user_id` is what `offboardPerson` cascades
+ * over, so a bot created here cannot outlive the access of the person who made
+ * it — which is the property that made self-service safe to offer at all.
+ */
+export async function createOwnBot(input: {
+  ownerUserId: string
+  /** What the person calls it. The owner's name is appended, not trusted to it. */
+  label: string
+}): Promise<IssuedServiceCredential & { botUserId: string; displayName: string }> {
+  const owner = await queryOne<{ kind: string; status: string; display_name: string | null }>(
+    'select kind, status, display_name from users where id = $1',
+    [input.ownerUserId],
+  )
+  if (!owner) throw new RoleRefused('no_such_identity')
+  if (owner.kind !== 'human') throw new RoleRefused('not_a_role')
+  if (owner.status !== 'active') throw new RoleRefused('not_active')
+
+  const existing = await botsOwnedBy(input.ownerUserId)
+  if (existing.length >= MAX_BOTS_PER_PERSON) throw new TooManyBots(MAX_BOTS_PER_PERSON)
+
+  /*
+    "steered by" rather than "for" or "of": PEEK-171 settled that the name has
+    to answer "who is behind this message" to somebody reading a conversation,
+    not merely "who owns this row".
+  */
+  const displayName = `${input.label} (steered by ${owner.display_name ?? 'their owner'})`
+
+  const bot = await createRoleIdentity({ displayName, ownerUserId: input.ownerUserId })
+  const credential = await issueServiceCredential({
+    userId: bot.id,
+    clientId: botClientId(input.label),
+    name: displayName,
+    // Read-only by construction. See above.
+    allowedKinds: [27235],
+  })
+
+  return { ...credential, botUserId: bot.id, displayName }
 }
 
 export interface ServiceCredential {

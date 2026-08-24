@@ -9,6 +9,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { config } from '../../config.js'
+import { recordAudit } from '../../domain/audit.js'
 import { AvatarRejected, MAX_AVATAR_BYTES, setAvatar } from '../../domain/avatar.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import {
@@ -19,6 +20,14 @@ import {
   publishProfile,
   saveProfile,
 } from '../../domain/profile.js'
+import { admitMember } from '../../domain/relay-membership.js'
+import {
+  MAX_BOTS_PER_PERSON,
+  RoleRefused,
+  TooManyBots,
+  botsOwnedBy,
+  createOwnBot,
+} from '../../domain/roles.js'
 import { findUserById } from '../../domain/users.js'
 import {
   AppError,
@@ -36,6 +45,8 @@ import { requireSession } from '../middleware/session.js'
  * is what preserves that distinction through parsing — collapsing them would
  * make an avatar edit silently revoke a handle.
  */
+const botSchema = z.object({ label: z.string().min(1).max(80) })
+
 const updateSchema = z
   .object({
     displayName: z.string().trim().max(200).nullable().optional(),
@@ -112,6 +123,88 @@ export function profileRoutes(): Hono<AppEnv> {
       eventId: outcome.eventId ?? null,
       ...(outcome.published ? {} : { publishError: outcome.reason ?? null }),
     })
+  })
+
+  /**
+   * Make a bot for yourself (PEEK-164).
+   *
+   * **No admin.** That is the whole point: onboarding one more person to the
+   * agent needed an admin for three separate steps, and PEEK-163 existed only
+   * to make one of them possible. A person who can sign in can make their own.
+   *
+   * What stops this being an escalation is in `createOwnBot`: the credential is
+   * NIP-98 only, so it can read and cannot publish; the display name is
+   * composed rather than accepted, so it cannot claim to be somebody else; and
+   * the bot is owned, so `offboardPerson` takes it when its owner goes.
+   *
+   * The secret is returned **once** and stored only as a hash, exactly like the
+   * admin path — this route is a different door to the same room, not a
+   * different room.
+   */
+  routes.post('/me/bots', requireSession, async (c) => {
+    const { userId } = c.get('session')
+    const parsed = botSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) throw badRequest('Expected { label }')
+
+    let created: Awaited<ReturnType<typeof createOwnBot>>
+    try {
+      created = await createOwnBot({ ownerUserId: userId, label: parsed.data.label })
+    } catch (error) {
+      if (error instanceof TooManyBots) throw conflict(error.message, { reason: 'too_many_bots' })
+      if (error instanceof RoleRefused) throw conflict(error.message, { reason: error.reason })
+      throw error
+    }
+
+    /*
+      Admitted here, the way enrolment admits a person's own key rather than
+      leaving it for an admin — otherwise self-service would remove two steps of
+      three and the bot would be born unable to read anything.
+      `relay_membership_required` is what it would hit, which reads as a
+      permission bug and is actually a missing member.
+
+      **Failure does not fail creation**, mirroring enrolment for the same
+      reason: the credential exists and works everywhere except the relay, and
+      throwing here would destroy something the caller can never see again —
+      the secret is returned once.
+    */
+    const admission = created.pubkey
+      ? await admitMember(created.pubkey)
+      : { ok: false, reason: 'no active key for this identity' }
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: userId,
+      action: 'role.create',
+      outcome: 'success',
+      subjectPubkey: created.pubkey ?? undefined,
+      detail: {
+        subjectUserId: created.botUserId,
+        displayName: created.displayName,
+        clientId: created.clientId,
+        selfService: true,
+        admitted: admission.ok,
+        ...(admission.ok ? {} : { admissionError: admission.reason }),
+      },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json({
+      bot: {
+        userId: created.botUserId,
+        displayName: created.displayName,
+        pubkey: created.pubkey,
+      },
+      clientId: created.clientId,
+      // Shown once. Only its hash is stored.
+      clientSecret: created.secret,
+      admitted: admission.ok,
+      ...(admission.ok ? {} : { admissionError: admission.reason ?? null }),
+    })
+  })
+
+  routes.get('/me/bots', requireSession, async (c) => {
+    const { userId } = c.get('session')
+    return c.json({ bots: await botsOwnedBy(userId), limit: MAX_BOTS_PER_PERSON })
   })
 
   /**
