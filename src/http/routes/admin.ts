@@ -42,6 +42,7 @@ import {
   createRoleIdentity,
   issueServiceCredential,
   renameRoleIdentity,
+  setCredentialKinds,
 } from '../../domain/roles.js'
 import { RoleChangeRefused, setUserRole } from '../../domain/users.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
@@ -56,6 +57,8 @@ const createRoleSchema = z.object({
 const roleSchema = z.object({ role: z.enum(['admin', 'member']) })
 
 const renameRoleSchema = z.object({ displayName: z.string().min(1).max(200) })
+
+const kindsSchema = z.object({ allowedKinds: z.array(z.number().int().nonnegative()).max(50) })
 
 const credentialSchema = z.object({
   clientId: z
@@ -563,6 +566,58 @@ export function adminRoutes(): Hono<AppEnv> {
       eventId: outcome.eventId ?? null,
       ...(outcome.published ? {} : { publishError: outcome.reason ?? null }),
     })
+  })
+
+  /**
+   * Change what a credential may sign, leaving the secret alone.
+   *
+   * The only previous route to a wider ceiling was re-issuing, which replaces
+   * the secret and therefore breaks every copy of it — the file on a laptop,
+   * the value in Claude Desktop's keychain, whatever somebody pasted into their
+   * own setup. A capability change and a credential rotation are different
+   * decisions, and making them one operation is why a needed widening gets put
+   * off until something fails at `/sign` (PEEK-172 has the list).
+   *
+   * Admin-only, and that is the point rather than an inconvenience: PEEK-145
+   * established there is no Folder boundary behind this, so `allowed_kinds` is
+   * the entire containment for an agent. Granting a kind is a decision about
+   * the whole workspace.
+   */
+  routes.patch('/admin/credentials/:clientId/kinds', ...adminOnly, async (c) => {
+    const { userId: actorUserId } = c.get('session')
+    const body = kindsSchema.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) throw badRequest('Expected { allowedKinds }')
+
+    let changed: Awaited<ReturnType<typeof setCredentialKinds>>
+    try {
+      changed = await setCredentialKinds({
+        clientId: c.req.param('clientId'),
+        allowedKinds: body.data.allowedKinds,
+      })
+    } catch (error) {
+      if (error instanceof RoleRefused) {
+        if (error.reason === 'no_such_identity') throw notFound('No such credential')
+        throw conflict(error.message, { reason: error.reason })
+      }
+      throw error
+    }
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId,
+      action: 'credential.kinds',
+      outcome: 'success',
+      detail: {
+        clientId: changed.clientId,
+        // Both sides, because "what was it before" is the question asked after
+        // something stops working, and nothing else records it.
+        from: changed.from,
+        to: changed.to,
+      },
+      requestId: c.get('requestId'),
+    })
+
+    return c.json({ credential: changed })
   })
 
   /**

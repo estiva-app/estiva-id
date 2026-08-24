@@ -293,6 +293,47 @@ export async function retireOwnBot(input: {
   return { displayName: bot.display_name }
 }
 
+/**
+ * Change what a credential may sign, without replacing the secret.
+ *
+ * There was no way to do this. `issueServiceCredential` upserts
+ * `client_secret_hash` along with `allowed_kinds`, so the only route to a wider
+ * ceiling was re-issuing — which **rotates the secret** and breaks every copy
+ * of it: the file on a laptop, the value in Claude Desktop's keychain, whatever
+ * a colleague pasted into their own setup.
+ *
+ * That coupling made a routine change expensive enough to avoid, which is how
+ * `peek create-topic` shipped against a ceiling nobody wanted to touch. A
+ * capability change and a credential rotation are different decisions and
+ * should not be the same operation.
+ *
+ * Still an admin action, and deliberately so: this is the one control standing
+ * between an agent and the whole workspace (PEEK-145 settled that there is no
+ * Folder boundary behind it), so widening is exactly the thing a member must
+ * not be able to do for their own bot.
+ */
+export async function setCredentialKinds(input: {
+  clientId: string
+  allowedKinds: number[]
+}): Promise<{ clientId: string; from: number[]; to: number[] }> {
+  const row = await queryOne<{
+    allowed_kinds: number[]
+    acts_as_user_id: string | null
+    status: string
+  }>('select allowed_kinds, acts_as_user_id, status from app_credentials where client_id = $1', [
+    input.clientId,
+  ])
+  if (!row) throw new RoleRefused('no_such_identity')
+  if (row.status !== 'active') throw new RoleRefused('not_active')
+
+  await query(
+    'update app_credentials set allowed_kinds = $2, updated_at = now() where client_id = $1',
+    [input.clientId, input.allowedKinds],
+  )
+
+  return { clientId: input.clientId, from: row.allowed_kinds, to: input.allowedKinds }
+}
+
 export interface ServiceCredential {
   clientId: string
   name: string
