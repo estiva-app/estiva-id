@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AdminPeople, AdminPerson } from './AdminPeople'
 import { AuditLog } from './AuditLog'
+import { BotsCard } from './BotsCard'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
 import { SecurityCard } from './SecurityCard'
@@ -17,10 +18,12 @@ import {
   ApiError,
   type Credential,
   type Me,
+  type OwnBot,
   type Profile,
   getMe,
   getProfile,
   listCredentials,
+  listOwnBots,
   logout,
 } from './api'
 
@@ -28,6 +31,8 @@ interface Loaded {
   me: Me
   profile: Profile
   credentials: Credential[]
+  bots: OwnBot[]
+  botLimit: number
 }
 
 type State =
@@ -86,12 +91,23 @@ export function App() {
 
   const load = useCallback(async () => {
     try {
-      const [me, profile, credentials] = await Promise.all([
+      const [me, profile, credentials, ownBots] = await Promise.all([
         getMe(),
         getProfile(),
         listCredentials(),
+        // Fails soft: a card that cannot list is still a card that can create,
+        // and losing the whole account page over it would take the useful half
+        // with the cosmetic one.
+        listOwnBots().catch(() => ({ bots: [], limit: 0 })),
       ])
-      setState({ kind: 'ready', me, profile, credentials })
+      setState({
+        kind: 'ready',
+        me,
+        profile,
+        credentials,
+        bots: ownBots.bots,
+        botLimit: ownBots.limit,
+      })
       return true
     } catch (error) {
       if (error instanceof ApiError && error.code === 'unauthenticated') {
@@ -147,7 +163,7 @@ export function App() {
     )
   }
 
-  const { me, profile, credentials } = state
+  const { me, profile, credentials, bots, botLimit } = state
 
   const signOut = (
     <button
@@ -291,6 +307,20 @@ export function App() {
         credentials={credentials}
         onChange={(next) => setState({ ...state, credentials: next })}
       />
+
+      {/*
+        Next to the passkeys, because both answer "what can act as me" — and a
+        bot is the one that keeps acting while you are asleep (PEEK-164).
+        Only for an active identity: a suspended or offboarded person making a
+        bot would be a way back in, and the server refuses it anyway.
+      */}
+      {me.status === 'active' && (
+        <BotsCard
+          bots={bots}
+          limit={botLimit}
+          onChange={(next) => setState({ ...state, bots: next })}
+        />
+      )}
 
       {/*
         Below the passkeys, because it is mostly about them — and because an

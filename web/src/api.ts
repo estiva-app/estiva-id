@@ -300,6 +300,44 @@ export const issueServiceCredential = (
     { method: 'POST', body: JSON.stringify(input) },
   )
 
+// --- Your own bots (PEEK-164) -----------------------------------------------
+
+export interface OwnBot {
+  id: string
+  displayName: string | null
+}
+
+/**
+ * The bots you made, and how many more you may make.
+ *
+ * Yours specifically — the server reads the owner from your session rather than
+ * taking an id, so there is no shape of this request that asks about somebody
+ * else's.
+ */
+export const listOwnBots = () => request<{ bots: OwnBot[]; limit: number }>('/me/bots')
+
+/**
+ * Make one, with no admin involved.
+ *
+ * `clientSecret` comes back **once** and is stored only as a hash. The label is
+ * yours; the display name is not — the server composes it so every bot says
+ * whose it is, because in a Peek conversation a bot renders exactly like a
+ * colleague (PEEK-171).
+ *
+ * `admitted` reports whether its key reached the relay's member list. False is
+ * not a failed creation: the credential is real and works everywhere except the
+ * relay, and the alternative — throwing — would destroy a secret nobody can see
+ * again.
+ */
+export const createOwnBot = (label: string) =>
+  request<{
+    bot: { userId: string; displayName: string; pubkey: string | null }
+    clientId: string
+    clientSecret: string
+    admitted: boolean
+    admissionError?: string | null
+  }>('/me/bots', { method: 'POST', body: JSON.stringify({ label }) })
+
 // --- The audit trail (PEEK-69) ----------------------------------------------
 
 export interface AuditEntry {
