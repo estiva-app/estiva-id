@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ApiError, type OwnBot, createOwnBot } from './api'
+import { ApiError, type OwnBot, createOwnBot, retireOwnBot } from './api'
 
 /**
  * The bots you made for yourself (PEEK-164).
@@ -38,6 +38,16 @@ export function BotsCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /** Which bot is mid-retire, so the row can say so and not be clicked twice. */
+  const [retiring, setRetiring] = useState<string | null>(null)
+  /**
+   * Which bot is one click from being stopped.
+   *
+   * A confirm step rather than an immediate action, because this cannot be
+   * undone: there is no un-retire, and the bot's secret is unrecoverable, so a
+   * mis-click costs setting the tool up again from scratch.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null)
   /**
    * The one that was just made, held only in this component's state.
    *
@@ -83,6 +93,20 @@ export function BotsCard({
     }
   }
 
+  async function retire(bot: OwnBot) {
+    setRetiring(bot.id)
+    setError(null)
+    try {
+      await retireOwnBot(bot.id)
+      onChange(bots.filter((candidate) => candidate.id !== bot.id))
+      setConfirming(null)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not stop that bot.')
+    } finally {
+      setRetiring(null)
+    }
+  }
+
   const atLimit = bots.length >= limit && limit > 0
 
   return (
@@ -107,7 +131,7 @@ export function BotsCard({
           */}
           <div className="notice">
             <strong>Copy the secret now.</strong> Only its hash is stored, so it cannot be shown
-            again — if you lose it, make another bot and delete this one.
+            again — if you lose it, make another bot and stop this one.
           </div>
           <dl className="facts">
             <dt>Name</dt>
@@ -151,14 +175,46 @@ export function BotsCard({
           {bots.length > 0 && (
             <ul className="plain">
               {bots.map((bot) => (
-                <li key={bot.id}>{bot.displayName ?? bot.id}</li>
+                <li key={bot.id} className="row">
+                  <span>{bot.displayName ?? bot.id}</span>
+                  {confirming === bot.id ? (
+                    <>
+                      {/*
+                        Says what stopping actually does before it is done.
+                        PEEK-170 was a Delete that left every message readable;
+                        the lesson is to name the outcome you produce, so this
+                        one says plainly which half it cannot undo.
+                      */}
+                      <span className="card-note">
+                        It stops working immediately and cannot be restarted. Anything it already
+                        wrote stays.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void retire(bot)
+                        }}
+                        disabled={retiring === bot.id}
+                      >
+                        {retiring === bot.id ? 'Stopping…' : 'Stop it'}
+                      </button>
+                      <button type="button" className="link" onClick={() => setConfirming(null)}>
+                        Keep it
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="link" onClick={() => setConfirming(bot.id)}>
+                      Stop
+                    </button>
+                  )}
+                </li>
               ))}
             </ul>
           )}
 
           {atLimit ? (
             <div className="notice">
-              You have {limit} bots, which is the most one person can have. Delete one before making
+              You have {limit} bots, which is the most one person can have. Stop one before making
               another.
             </div>
           ) : (

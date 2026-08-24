@@ -250,6 +250,49 @@ export async function createOwnBot(input: {
   return { ...credential, botUserId: bot.id, displayName }
 }
 
+/**
+ * Stop one of your own bots, for good.
+ *
+ * **Offboarding, not deletion**, and the word matters after PEEK-170: calling
+ * something Delete when it does not delete is how somebody ends up believing a
+ * thing is gone while it is still readable. What actually happens here is that
+ * the bot's identity is offboarded — it can never mint another token, its key
+ * stops being admitted to the relay — and everything it already wrote stays
+ * exactly where it is, attributed to it, the same way a person's messages
+ * outlast their account.
+ *
+ * The credential row is left in place for the same reason `offboardPerson`
+ * leaves it: deleting it would let a re-issue silently recreate access under
+ * the same client id, and the audit trail would lose what the bot was.
+ *
+ * Ownership is checked here rather than in the route, because the subject alone
+ * decides it — a caller who is not the owner must be refused whether the
+ * request came from the console, a script, or a future caller nobody has
+ * written yet.
+ */
+export async function retireOwnBot(input: {
+  ownerUserId: string
+  botUserId: string
+}): Promise<{ displayName: string | null }> {
+  const bot = await queryOne<{
+    kind: string
+    status: string
+    display_name: string | null
+    owner_user_id: string | null
+  }>('select kind, status, display_name, owner_user_id from users where id = $1', [input.botUserId])
+  if (!bot) throw new RoleRefused('no_such_identity')
+  if (bot.kind !== 'role') throw new RoleRefused('not_a_role')
+  /*
+    Somebody else's bot, or the workspace's, is `no_such_identity` rather than a
+    refusal that confirms it exists. A person poking at ids should not learn
+    which ones are real.
+  */
+  if (bot.owner_user_id !== input.ownerUserId) throw new RoleRefused('no_such_identity')
+  if (bot.status !== 'active') throw new RoleRefused('not_active')
+
+  return { displayName: bot.display_name }
+}
+
 export interface ServiceCredential {
   clientId: string
   name: string
