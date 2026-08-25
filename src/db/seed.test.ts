@@ -8,6 +8,7 @@
  * wrongly fails exactly like a bug.
  */
 import { describe, expect, it } from 'vitest'
+import { config } from '../config.js'
 import { SEED_APPS } from './seed.js'
 
 const app = (clientId: string) => {
@@ -85,13 +86,40 @@ describe('seeded signing policies', () => {
     expect(allowed).not.toContain(30622)
   })
 
-  it('does not yet let Peek sign relay auth, which needs a scope with it', () => {
-    // 22242 is NIP-42. Unqualified it lets Peek mint relay-auth credentials for
-    // *any* relay, so PEE-4 pairs the grant with a `relay`-tag prefix check in
-    // policy.ts. Until that exists the grant alone is a widening — this asserts
-    // the pairing rather than the number, and should be deleted, not flipped,
-    // when PEE-4 lands.
-    expect(app('estiva-peek').allowedKinds).not.toContain(22242)
+  it('lets Peek sign relay auth, and never without a relay to sign it for', () => {
+    // PEE-4, and the assertion this replaces was the previous half of it: while
+    // `policy.ts` had no `relay`-tag branch, the grant alone was a widening, so
+    // 22242 was pinned *absent* to force the pairing. The pairing exists now, so
+    // what is worth asserting is the pairing itself rather than either number.
+    //
+    // Stated in both directions on purpose. The kind without a relay list is an
+    // app that authenticates nowhere — a `/sign` that passes the kind check and
+    // is then refused for every relay there is, which is PEEK-133's shape. A
+    // relay list without the kind is inert, and would sit there looking like a
+    // grant until somebody added 22242 and got no scope with it.
+    for (const seeded of SEED_APPS) {
+      expect(
+        seeded.allowedKinds.includes(22242),
+        `${seeded.clientId}: 22242 and relayAuthUrls must agree`,
+      ).toBe(seeded.relayAuthUrls().length > 0)
+    }
+    expect(app('estiva-peek').allowedKinds).toContain(22242)
+  })
+
+  it('does not let Ship sign relay auth', () => {
+    // Ship reads the relay over the HTTP bridge and opens no socket, so it has
+    // no challenge to answer. Asserted rather than left absent because the
+    // natural instinct on the next socket ticket is to grant both apps at once.
+    expect(app('estiva-ship').allowedKinds).not.toContain(22242)
+    expect(app('estiva-ship').relayAuthUrls()).toEqual([])
+  })
+
+  it('scopes Peek to the deployment’s relays and nothing wider', () => {
+    // The app column can only narrow — `policy.ts` ANDs it with the deployment
+    // bound — but seeding it from anywhere other than that bound would make the
+    // row look like an independent grant.
+    expect(app('estiva-peek').relayAuthUrls()).toEqual([...config().SIGN_RELAY_AUTH_ALLOWED_URLS])
+    expect(app('estiva-peek').relayAuthUrls().length).toBeGreaterThan(0)
   })
 
   it('lets Peek sign the Change kind it needs to act on a Ship object', () => {

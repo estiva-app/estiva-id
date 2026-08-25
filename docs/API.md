@@ -705,6 +705,8 @@ Refusals (`422`, `detail.reason`):
 | `kind_not_allowed` | Outside this app's `allowed_kinds`. |
 | `nip98_missing_url` | A `27235` event with no `u` tag. |
 | `nip98_url_not_allowed` | The `u` URL is not allowed by both the deployment allowlist and the app's. |
+| `relay_auth_missing_relay` | A `22242` event with no `relay` tag, or one that is not a URL. |
+| `relay_auth_relay_not_allowed` | The relay is not allowed by both the deployment allowlist and the app's. |
 
 `403` for an unknown app credential or an identity with no active key; `401` for
 a missing or invalid token.
@@ -717,8 +719,8 @@ Per-app rows in `app_credentials`:
 
 | App | `client_id` | Kinds |
 | --- | --- | --- |
-| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851 |
-| Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 31989, 27235 |
+| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242 |
+| Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078 |
 
 **9007 is the container, not an afterthought.** Ship's Folder carries the `h`
 tag every project, issue, change and message references, and `createProject`
@@ -735,3 +737,83 @@ NIP-98 URLs must be allowed by **both** `SIGN_NIP98_ALLOWED_URL_PREFIXES` (the
 deployment's outer bound) and the app's `nip98_url_prefixes`. Both default to
 empty, so `27235` signing is off until the relay bridge host is settled — see
 [OPEN-SEAMS.md](OPEN-SEAMS.md).
+
+### Two kinds are scoped by destination, not only by number
+
+`27235` and `22242` are the only entries in an app's list that are not
+self-contained. Every other kind is a thing the app publishes; these two are
+**credentials aimed at somewhere**, so the number alone does not say what the
+grant is worth.
+
+| Kind | Tag read | Bound by | Match |
+| --- | --- | --- | --- |
+| `27235` NIP-98 | `u` | `SIGN_NIP98_ALLOWED_URL_PREFIXES` ∩ `app_credentials.nip98_url_prefixes` | prefix |
+| `22242` NIP-42 | `relay` | `SIGN_RELAY_AUTH_ALLOWED_URLS` ∩ `app_credentials.relay_auth_urls` | exact, after URL normalization |
+
+Both intersect a deployment bound with a per-app column, so an app can narrow
+itself and can never widen past the deployment. Both default to empty, which
+means refuse.
+
+**Why 22242 matches exactly where 27235 matches by prefix.** A NIP-98 `u` tag is
+a full request URL with a path, so a prefix is the only workable shape. A NIP-42
+`relay` tag is a whole relay URL with no path — a prefix buys nothing there and
+costs something: `wss://estiva.estiva.app` as a prefix would also admit
+`wss://estiva.estiva.app.attacker.example/`. That is the same hazard the
+redirect URIs are matched exactly for.
+
+**Why `relay_auth_urls` is its own column** rather than reusing
+`nip98_url_prefixes`, which holds the same origin today: they are two
+capabilities. NIP-98 reaches the relay's HTTP bridge as a client; NIP-42
+authenticates *the user* to a relay over a socket. One column would mean
+widening an app's bridge access silently widened what it can authenticate as,
+and there would be no way to grant one without the other. It is deliberately not
+derived from `RELAY_BRIDGE_URL` either — that is an https origin whose emptiness
+means "profile publishing is off", and sharing it would give two capabilities one
+switch.
+
+## Encryption
+
+### `POST /nip44/encrypt` and `POST /nip44/decrypt`
+
+Bearer JWT. NIP-44 **v2**, and never NIP-04.
+
+```json
+{ "plaintext": "h:9f2c read at 1756000000" }   →   { "ciphertext": "Ag…" }
+{ "ciphertext": "Ag…" }                        →   { "plaintext": "h:9f2c read at 1756000000" }
+```
+
+**Self-encryption only.** Both operate on
+`nip44_conversation_key(own_priv, own_pub)` and neither accepts a peer pubkey.
+The request schemas are strict, so sending `pubkey` is a `400` rather than a
+field that is ignored — an app that believed it was encrypting to a colleague
+must not receive a blob only the user can open.
+
+The distinction is the whole security argument. A general `/decrypt` is a
+decryption oracle for anything ever encrypted to that user, DMs included. A
+self-only `/decrypt` reads only what the user encrypted to themselves — today,
+NIP-RS read state. That is still behavioural data about a person, which is why
+the rate limit and the audit rows are here from the first commit rather than
+added after.
+
+| Response | When |
+| --- | --- |
+| `400` | Malformed body, an unknown field, plaintext outside 1–65535 **bytes** of UTF-8, or a ciphertext that will not open |
+| `401` | Missing or invalid token |
+| `403` | Unknown app credential, no active key, or the person is no longer active |
+| `422` | `detail.reason: app_disabled` |
+| `429` | 120 operations per minute exceeded, per app per person. `Retry-After` in seconds |
+
+**Every decryption failure gives one answer**, `detail.reason: undecryptable`.
+Distinguishing a bad MAC from bad padding to the caller is a padding oracle; the
+specific cause goes to `audit_events` instead, where it is useful and out of
+reach.
+
+Both endpoints write `nip44.{encrypt,decrypt}.{granted,refused}` audit rows.
+**Neither plaintext nor ciphertext is recorded, and neither is their length.**
+
+**Cross-origin** on the same terms as `/sign`.
+
+The rate limit is a **per-process** counter (`src/http/rate-limit.ts`). Estiva ID
+runs as one container, so that is a per-deployment limit today; it would not be
+under two replicas, and anything that scales this service out has to move the
+counter into Postgres or Redis first.

@@ -94,6 +94,24 @@ const schema = z.object({
   SIGN_NIP98_ALLOWED_URL_PREFIXES: commaSeparated,
 
   /**
+   * Relays a NIP-42 (kind 22242) challenge response may be signed for. Empty
+   * means **refuse all 22242 signing**, the same fail-closed posture as the
+   * NIP-98 list above and for a sharper reason: a 22242 authenticates the user
+   * themselves to whichever relay issued the challenge, so an unbounded list is
+   * an app that can be the user at any relay on the internet.
+   *
+   * Whole relay URLs, e.g. `wss://estiva.estiva.app`, and **matched exactly**
+   * after normalization rather than by prefix — see `domain/policy.ts`. A
+   * trailing slash makes no difference; a different host does.
+   *
+   * Deliberately not derived from `RELAY_BRIDGE_URL` below, which is the same
+   * host today. That one is an https origin for the HTTP bridge and empty means
+   * "profile publishing is off"; reusing it would make turning publishing off
+   * also turn relay auth off, and would give the two capabilities one switch.
+   */
+  SIGN_RELAY_AUTH_ALLOWED_URLS: commaSeparated,
+
+  /**
    * Where profiles are published (PEEK-31). Empty means **publishing is off**,
    * which is the flag: a deployment with no relay still serves auth and tokens,
    * it just cannot make a profile visible to anyone.

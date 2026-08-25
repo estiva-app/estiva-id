@@ -14,12 +14,13 @@ interface AppRow {
   name: string
   allowed_kinds: number[]
   nip98_url_prefixes: string[]
+  relay_auth_urls: string[]
   status: 'active' | 'disabled'
 }
 
 export async function findAppPolicy(clientId: string): Promise<AppPolicy | undefined> {
   const row = await queryOne<AppRow>(
-    `select client_id, name, allowed_kinds, nip98_url_prefixes, status
+    `select client_id, name, allowed_kinds, nip98_url_prefixes, relay_auth_urls, status
        from app_credentials where client_id = $1`,
     [clientId],
   )
@@ -29,6 +30,7 @@ export async function findAppPolicy(clientId: string): Promise<AppPolicy | undef
     name: row.name,
     allowedKinds: row.allowed_kinds,
     nip98UrlPrefixes: row.nip98_url_prefixes,
+    relayAuthUrls: row.relay_auth_urls,
     status: row.status,
   }
 }

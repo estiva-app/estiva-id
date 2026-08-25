@@ -16,6 +16,10 @@ const defaults: Record<string, string> = {
   KEY_ENCRYPTION_KEK: '1111111111111111111111111111111111111111111111111111111111111111',
   KEY_ENCRYPTION_KID: 'test-1',
   SIGN_NIP98_ALLOWED_URL_PREFIXES: 'http://relay.test/',
+  // Deliberately without a trailing slash, while the events under test carry
+  // one: the seeded value and the wire value are spelled differently in
+  // practice, and normalizing both sides is the thing that has to keep working.
+  SIGN_RELAY_AUTH_ALLOWED_URLS: 'ws://relay.test',
 }
 
 for (const [key, value] of Object.entries(defaults)) {
