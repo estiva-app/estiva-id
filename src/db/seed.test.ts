@@ -65,6 +65,35 @@ describe('seeded signing policies', () => {
     }
   })
 
+  it('lets both apps sign the read-state kind', () => {
+    // Read state is a property of the person, not the app (CRO-2, ADR 0001
+    // layer 2), so both write it and neither owns it. Granting one would make
+    // "read it in Ship, it is read in Peek" true in one direction only.
+    for (const client of ['estiva-ship', 'estiva-peek']) {
+      expect(app(client).allowedKinds).toContain(30078)
+    }
+  })
+
+  it('lets Peek sign the DM commands, and not the relay-signed snapshot', () => {
+    const allowed = app('estiva-peek').allowedKinds
+    for (const kind of [41010, 41011, 41012]) expect(allowed).toContain(kind)
+    // 30622 is relay-signed and result-gated: the relay republishes it and a
+    // reader must equal its `#p`. Granting it would let Peek forge a
+    // visibility snapshot, and ingest would refuse it anyway. The absence is
+    // the decision, so it is asserted rather than left to be re-added by
+    // somebody completing the set.
+    expect(allowed).not.toContain(30622)
+  })
+
+  it('does not yet let Peek sign relay auth, which needs a scope with it', () => {
+    // 22242 is NIP-42. Unqualified it lets Peek mint relay-auth credentials for
+    // *any* relay, so PEE-4 pairs the grant with a `relay`-tag prefix check in
+    // policy.ts. Until that exists the grant alone is a widening — this asserts
+    // the pairing rather than the number, and should be deleted, not flipped,
+    // when PEE-4 lands.
+    expect(app('estiva-peek').allowedKinds).not.toContain(22242)
+  })
+
   it('lets Peek sign the Change kind it needs to act on a Ship object', () => {
     // Acting on another app's object means writing *that app's* kind: Peek's
     // `buildActionEvent` takes it from the target's own manifest, so changing a
