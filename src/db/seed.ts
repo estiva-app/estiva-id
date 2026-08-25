@@ -17,6 +17,21 @@ interface SeedApp {
   name: string
   allowedKinds: number[]
   nip98UrlPrefixes: string[]
+  /**
+   * Relays this app may answer a NIP-42 challenge from (PEE-4).
+   *
+   * A thunk, and stated per app rather than defaulted from the deployment the
+   * way `nip98UrlPrefixes` is below. The two lists differ in who needs them:
+   * every app needs the bridge, so defaulting there prevents a credential that
+   * holds 27235 and can reach nothing. Only Peek answers relay challenges, so
+   * defaulting here would hand a relay to apps that have no business
+   * authenticating to one — and would make a later `22242` on some other app's
+   * row an unscoped grant, silently, because its relay list was already full.
+   *
+   * The invariant to keep: an app has a non-empty list here **iff** it has
+   * 22242 above. `seed.test.ts` asserts both directions.
+   */
+  relayAuthUrls: () => string[]
   /** Where `/authorize` may send this app back to. Exact match — see config. */
   redirectUris: () => string[]
 }
@@ -123,13 +138,30 @@ export const SEED_APPS: readonly SeedApp[] = [
     // ever reads its own. Granting it would let Peek forge a visibility
     // snapshot, and ingest would refuse it anyway as relay-signed-only.
     //
-    // Deliberately NOT 22242 either, and that one is not an omission — see the
-    // PR. NIP-42 relay auth needs a scoping control in `policy.ts` alongside
-    // the grant (PEE-4), because unqualified it lets Peek mint relay-auth
-    // credentials for any relay at all. The grant without the control is a
-    // widening, so the two land together or not at all.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012],
+    // 22242 is NIP-42 relay auth (PEE-4), and it is the one entry in this list
+    // that is **not** safe on its own. Every other kind here is a thing Peek
+    // publishes; a 22242 is a challenge response, so signing one proves to a
+    // relay that this user is present at it. Unqualified, that is "Peek may be
+    // this person at any relay on the internet".
+    //
+    // So it lands paired with `relayAuthUrls` below and with the `relay`-tag
+    // branch in `domain/policy.ts`, which ANDs that column against
+    // SIGN_RELAY_AUTH_ALLOWED_URLS. Neither half is useful alone and neither is
+    // safe alone: the kind without the scope is a widening, and the scope
+    // without the kind is inert.
+    //
+    // The relay requires NIP-42 before it accepts a subscription
+    // (`auth_required: true`), so without this every REQ on an otherwise
+    // healthy socket returns `auth-required: authenticate before subscribing`.
+    // Same shape as the three /sign refusals above — everything looks connected
+    // and nothing arrives — reached down a different path, because here it is
+    // the relay refusing rather than `/sign`. Like 9008, it is added before the
+    // code that needs it: M3's socket work cannot be tested until it is live.
+    allowedKinds: [
+      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242,
+    ],
     nip98UrlPrefixes: [],
+    relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
   {
@@ -166,6 +198,11 @@ export const SEED_APPS: readonly SeedApp[] = [
     // the person, so both apps write it and neither owns it.
     allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078],
     nip98UrlPrefixes: [],
+    // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
+    // so it has nothing to authenticate. Empty rather than the deployment's
+    // list, so that adding the kind here later cannot be a one-line unscoped
+    // grant — it has to name a relay too.
+    relayAuthUrls: () => [],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },
 ]
@@ -188,12 +225,13 @@ export async function seedApps(): Promise<void> {
   for (const app of SEED_APPS) {
     await query(
       `insert into app_credentials
-         (client_id, name, allowed_kinds, nip98_url_prefixes, redirect_uris)
-       values ($1, $2, $3, $4, $5)
+         (client_id, name, allowed_kinds, nip98_url_prefixes, relay_auth_urls, redirect_uris)
+       values ($1, $2, $3, $4, $5, $6)
        on conflict (client_id) do update
          set name = excluded.name,
              allowed_kinds = excluded.allowed_kinds,
              nip98_url_prefixes = excluded.nip98_url_prefixes,
+             relay_auth_urls = excluded.relay_auth_urls,
              redirect_uris = excluded.redirect_uris,
              updated_at = now()`,
       [
@@ -204,6 +242,7 @@ export async function seedApps(): Promise<void> {
         // the deployment's own list rather than seeding an app that is allowed
         // a kind it can never actually use.
         app.nip98UrlPrefixes.length > 0 ? app.nip98UrlPrefixes : relayPrefixes(),
+        app.relayAuthUrls(),
         app.redirectUris(),
       ],
     )

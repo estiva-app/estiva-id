@@ -13,6 +13,7 @@ export type ErrorCode =
   | 'not_found'
   | 'conflict'
   | 'policy_violation'
+  | 'rate_limited'
   | 'internal'
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -22,6 +23,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   policy_violation: 422,
+  rate_limited: 429,
   internal: 500,
 }
 
@@ -57,6 +59,17 @@ export const conflict = (message: string, detail?: Record<string, unknown>) =>
 /** A `/sign` request that was well-formed but refused by app policy (PEEK-71). */
 export const policyViolation = (message: string, detail?: Record<string, unknown>) =>
   new AppError('policy_violation', message, detail)
+
+/**
+ * Too many calls in the window (CRO-1).
+ *
+ * Distinct from `policy_violation` on purpose: a policy refusal will fail
+ * identically forever and a caller should stop, while this one succeeds if it
+ * waits. Collapsing them would have apps retrying the first and giving up on
+ * the second.
+ */
+export const rateLimited = (message: string, detail?: Record<string, unknown>) =>
+  new AppError('rate_limited', message, detail)
 
 export interface ErrorBody {
   error: { code: ErrorCode; message: string; detail?: Record<string, unknown> }

@@ -355,3 +355,80 @@ describe('cross-origin (PEEK-93)', () => {
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
   })
 })
+
+describe('NIP-42 once the deployment allows the relay (PEE-4)', () => {
+  // Same posture as the NIP-98 block above, and the same reason for testing it
+  // here rather than only in `policy.test.ts`: the rule is a pure function, but
+  // the *column* has to survive `seed.ts` → `findAppPolicy` → `evaluateSignPolicy`.
+  // A `relay_auth_urls` missing from that SELECT would leave the field
+  // undefined, and the endpoint would refuse every relay while every unit test
+  // still passed.
+  //
+  // The test environment allows `ws://relay.test` with no trailing slash while
+  // the events below carry one, so a round trip through here also proves the
+  // normalization is applied on both sides.
+  const relayAuth = (relay: string) => ({
+    kind: 22242,
+    tags: [
+      ['relay', relay],
+      ['challenge', 'a-challenge-from-the-relay'],
+    ],
+    content: '',
+  })
+
+  it('signs a challenge response for the deployment’s relay', async () => {
+    const response = await sign(peekToken, relayAuth('ws://relay.test/'))
+    expect(response.status).toBe(200)
+
+    const { event } = (await response.json()) as { event: Parameters<typeof verifyEvent>[0] }
+    expect(event.kind).toBe(22242)
+    expect(verifyEvent(event)).toBe(true)
+  })
+
+  it('refuses a challenge from any other relay', async () => {
+    const response = await sign(peekToken, relayAuth('wss://evil.test/'))
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'relay_auth_relay_not_allowed' } },
+    })
+  })
+
+  it('refuses a 22242 with no relay tag', async () => {
+    const response = await sign(peekToken, {
+      kind: 22242,
+      tags: [['challenge', 'a-challenge-from-the-relay']],
+      content: '',
+    })
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'relay_auth_missing_relay' } },
+    })
+  })
+
+  it('refuses Ship, which is granted neither the kind nor a relay', async () => {
+    const response = await sign(shipToken, relayAuth('ws://relay.test/'))
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'kind_not_allowed' } },
+    })
+  })
+
+  it('refuses the kind once the row’s relays are cleared, without touching the kind', async () => {
+    // The state a bare `22242` in `seed.ts` would have produced. It is the
+    // column that decides, so emptying it must refuse even though the app still
+    // holds the kind — this is the pairing the grant could not ship without.
+    await query("update app_credentials set relay_auth_urls = '{}' where client_id = 'estiva-peek'")
+    const response = await sign(peekToken, relayAuth('ws://relay.test/'))
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { detail: { reason: 'relay_auth_relay_not_allowed' } },
+    })
+  })
+
+  it('does not let the row widen past the deployment’s list', async () => {
+    await query(
+      "update app_credentials set relay_auth_urls = '{wss://evil.test/}' where client_id = 'estiva-peek'",
+    )
+    expect((await sign(peekToken, relayAuth('wss://evil.test/'))).status).toBe(422)
+  })
+})

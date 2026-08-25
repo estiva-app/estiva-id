@@ -6,9 +6,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { UnsignedEvent } from '../nostr/event.js'
-import { type AppPolicy, evaluateSignPolicy } from './policy.js'
+import { type AppPolicy, evaluateEncryptionPolicy, evaluateSignPolicy } from './policy.js'
 
 const RELAY = 'https://relay.estiva.test/'
+const RELAY_WS = 'wss://relay.estiva.test'
 
 // The lists PEEK-71 gives, which are knowable from what each app publishes.
 const PEEK: AppPolicy = {
@@ -16,6 +17,7 @@ const PEEK: AppPolicy = {
   name: 'Estiva Peek',
   allowedKinds: [9, 7, 5, 9007],
   nip98UrlPrefixes: [RELAY],
+  relayAuthUrls: [],
   status: 'active',
 }
 
@@ -24,6 +26,7 @@ const SHIP: AppPolicy = {
   name: 'estiva-ship',
   allowedKinds: [30850, 30851, 1851, 9, 5, 31989],
   nip98UrlPrefixes: [],
+  relayAuthUrls: [],
   status: 'active',
 }
 
@@ -136,5 +139,159 @@ describe('NIP-98 (27235) is constrained by URL', () => {
     expect(
       evaluateSignPolicy(httpAuth('https://evil.test/steal'), overreaching, [RELAY]),
     ).toMatchObject({ allowed: false, reason: 'nip98_url_not_allowed' })
+  })
+})
+
+describe('NIP-42 (22242) is constrained by relay', () => {
+  const relayAuth = (relay?: string) =>
+    event(
+      22242,
+      relay
+        ? [
+            ['relay', relay],
+            ['challenge', 'abc123'],
+          ]
+        : [['challenge', 'abc123']],
+    )
+
+  /** The paired shape PEE-4 requires: the kind and a relay, never one alone. */
+  const peekWith42: AppPolicy = {
+    ...PEEK,
+    allowedKinds: [...PEEK.allowedKinds, 22242],
+    relayAuthUrls: [RELAY_WS],
+  }
+
+  it('allows a challenge from the deployment’s own relay', () => {
+    expect(evaluateSignPolicy(relayAuth(RELAY_WS), peekWith42, [RELAY], [RELAY_WS]).allowed).toBe(
+      true,
+    )
+  })
+
+  it('refuses a challenge from any other relay', () => {
+    // The whole reason the grant could not ship alone: answering this proves to
+    // evil.test that the user is present there.
+    expect(
+      evaluateSignPolicy(relayAuth('wss://evil.test'), peekWith42, [RELAY], [RELAY_WS]),
+    ).toMatchObject({ allowed: false, reason: 'relay_auth_relay_not_allowed' })
+  })
+
+  it('refuses a 22242 with no relay tag', () => {
+    expect(evaluateSignPolicy(relayAuth(), peekWith42, [RELAY], [RELAY_WS])).toMatchObject({
+      allowed: false,
+      reason: 'relay_auth_missing_relay',
+    })
+  })
+
+  it('refuses a relay tag that is not a URL at all', () => {
+    expect(
+      evaluateSignPolicy(relayAuth('not-a-url'), peekWith42, [RELAY], [RELAY_WS]),
+    ).toMatchObject({ allowed: false, reason: 'relay_auth_missing_relay' })
+  })
+
+  // Fail-closed, like the NIP-98 bound above: a deployment that has not named
+  // its relays answers no challenges.
+  it('refuses everything when the deployment allowlist is empty', () => {
+    expect(evaluateSignPolicy(relayAuth(RELAY_WS), peekWith42, [RELAY], [])).toMatchObject({
+      allowed: false,
+      reason: 'relay_auth_relay_not_allowed',
+    })
+  })
+
+  // ...including when the argument is simply not passed. The default exists so
+  // that a caller which forgets the bound refuses rather than grants.
+  it('refuses when the deployment bound is omitted entirely', () => {
+    expect(evaluateSignPolicy(relayAuth(RELAY_WS), peekWith42, [RELAY])).toMatchObject({
+      allowed: false,
+      reason: 'relay_auth_relay_not_allowed',
+    })
+  })
+
+  it('refuses when the app has no relays, even if the deployment allows one', () => {
+    // This is the state a bare `22242` in seed.ts would produce, and the reason
+    // the grant and the scope land together: the row decides, not the kind list.
+    const unscoped: AppPolicy = { ...peekWith42, relayAuthUrls: [] }
+    expect(evaluateSignPolicy(relayAuth(RELAY_WS), unscoped, [RELAY], [RELAY_WS])).toMatchObject({
+      allowed: false,
+      reason: 'relay_auth_relay_not_allowed',
+    })
+  })
+
+  it('does not let an app grant itself a relay the deployment forbids', () => {
+    const overreaching: AppPolicy = { ...peekWith42, relayAuthUrls: ['wss://evil.test'] }
+    expect(
+      evaluateSignPolicy(relayAuth('wss://evil.test'), overreaching, [RELAY], [RELAY_WS]),
+    ).toMatchObject({ allowed: false, reason: 'relay_auth_relay_not_allowed' })
+  })
+
+  it('treats a trailing slash as the same relay on either side', () => {
+    // `wss://x` and `wss://x/` are one relay and both are written in practice.
+    for (const [configured, tagged] of [
+      [RELAY_WS, `${RELAY_WS}/`],
+      [`${RELAY_WS}/`, RELAY_WS],
+      ['wss://RELAY.estiva.TEST/', RELAY_WS],
+    ] as const) {
+      const app: AppPolicy = { ...peekWith42, relayAuthUrls: [configured] }
+      expect(
+        evaluateSignPolicy(relayAuth(tagged), app, [RELAY], [configured]).allowed,
+        `${configured} vs ${tagged}`,
+      ).toBe(true)
+    }
+  })
+
+  // The reason this branch matches exactly where NIP-98 matches by prefix. As a
+  // prefix, a bare origin also admits every host that merely starts with it.
+  it('does not admit a lookalike host that extends the allowed one', () => {
+    for (const impostor of [
+      'wss://relay.estiva.test.attacker.example/',
+      'wss://relay.estiva.test.attacker.example',
+      'wss://relay.estiva.testing/',
+    ]) {
+      expect(
+        evaluateSignPolicy(relayAuth(impostor), peekWith42, [RELAY], [RELAY_WS]),
+        impostor,
+      ).toMatchObject({ allowed: false, reason: 'relay_auth_relay_not_allowed' })
+    }
+  })
+
+  it('still refuses 22242 outright for an app that was never granted the kind', () => {
+    // The kind check runs first, so an app without 22242 never reaches the
+    // relay branch — and gets the refusal that names the real reason.
+    expect(evaluateSignPolicy(relayAuth(RELAY_WS), PEEK, [RELAY], [RELAY_WS])).toMatchObject({
+      allowed: false,
+      reason: 'kind_not_allowed',
+    })
+  })
+
+  it('refuses a disabled app before it looks at the relay', () => {
+    expect(
+      evaluateSignPolicy(
+        relayAuth(RELAY_WS),
+        { ...peekWith42, status: 'disabled' },
+        [RELAY],
+        [RELAY_WS],
+      ),
+    ).toMatchObject({ allowed: false, reason: 'app_disabled' })
+  })
+})
+
+describe('the encryption gate (CRO-1)', () => {
+  it('lets an active app encrypt', () => {
+    expect(evaluateEncryptionPolicy(PEEK).allowed).toBe(true)
+  })
+
+  it('refuses a disabled app', () => {
+    // `/nip44/decrypt` reads what somebody has read and when. A credential that
+    // has been turned off must not still resolve that.
+    expect(evaluateEncryptionPolicy({ ...PEEK, status: 'disabled' })).toMatchObject({
+      allowed: false,
+      reason: 'app_disabled',
+    })
+  })
+
+  it('does not consult the kind list, which says nothing about encryption', () => {
+    // A kind ceiling bounds what an app may *publish*. Encryption publishes
+    // nothing, so an app with an empty list is still allowed here — stated as a
+    // test because reading `allowedKinds` would be the natural wrong instinct.
+    expect(evaluateEncryptionPolicy({ ...PEEK, allowedKinds: [] }).allowed).toBe(true)
   })
 })

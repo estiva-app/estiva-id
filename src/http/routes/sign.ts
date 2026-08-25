@@ -157,7 +157,12 @@ export function signRoutes(): Hono<AppEnv> {
       content: parsed.data.event.content,
     }
 
-    const decision = evaluateSignPolicy(unsigned, app, cfg.SIGN_NIP98_ALLOWED_URL_PREFIXES)
+    const decision = evaluateSignPolicy(
+      unsigned,
+      app,
+      cfg.SIGN_NIP98_ALLOWED_URL_PREFIXES,
+      cfg.SIGN_RELAY_AUTH_ALLOWED_URLS,
+    )
     if (!decision.allowed) {
       // "Done when: an app asking to sign a kind outside its list is refused,
       // and the refusal is logged."
