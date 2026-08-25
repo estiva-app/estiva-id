@@ -99,7 +99,15 @@ export const SEED_APPS: readonly SeedApp[] = [
     // A ceiling, not a grant: Buzz enforces "only owner can delete group" in
     // `validate_admin_event`, so this says Peek may sign the kind, not that any
     // given delete is permitted.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008],
+    // 1111 is NIP-22, and Peek needs it for the same reason Ship does — but a
+    // step removed, which is why it is easy to miss. Peek does not decide to
+    // publish a comment kind; `buildActionEvent` stamps whatever the *owning
+    // app's* NIP-89 manifest declares. So the moment Ship's manifest says
+    // `1111` (REW-10), Peek's comment action starts signing `1111` without
+    // anyone changing a line of Peek. Without this it fails at `/sign` — after
+    // the manifest has already offered the action, which is exactly how the
+    // kind:1851 case failed in the demo.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
@@ -119,7 +127,21 @@ export const SEED_APPS: readonly SeedApp[] = [
     // The same number is a huddle for Peek, above. That is fine: this list says
     // what an app may sign, not what a kind means, and the two apps are
     // separately bounded.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235],
+    //
+    // 1111 is NIP-22, and it is how Ship's comments are moving (REW-10). Today
+    // a comment is a kind:9 into the project's Folder carrying an `a` tag; the
+    // tag is already standard and the kind is not. `1111` scopes a threaded
+    // comment to an *addressable* event, which is what lets two apps comment on
+    // the same object without either owning the comment kind — Peek publishes
+    // the same shape into the same Folder, and reads the kind off Ship's NIP-89
+    // manifest rather than assuming one.
+    //
+    // Granted before anything writes it, deliberately. Ship's fold already
+    // reads `1111` (merged), the relay already accepts it (measured, not
+    // inferred from the registry), and this is the last gate that refuses at
+    // the final publish rather than at build time. A ceiling that arrives after
+    // the code is the reason PEEK-172 exists.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },

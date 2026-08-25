@@ -30,6 +30,7 @@ const SHIP = {
   ISSUE: 30851,
   CHANGE: 1851,
   MESSAGE: 9,
+  COMMENT: 1111,
 } as const
 
 describe('seeded signing policies', () => {
@@ -45,6 +46,22 @@ describe('seeded signing policies', () => {
     const allowed = app('estiva-ship').allowedKinds
     for (const kind of [SHIP.PROJECT, SHIP.ISSUE, SHIP.CHANGE, SHIP.MESSAGE]) {
       expect(allowed).toContain(kind)
+    }
+  })
+
+  it('lets both apps sign the NIP-22 comment kind', () => {
+    // Granted before anything writes it, which is the unusual part and the
+    // point. Ship's comments are moving from kind:9 to `1111` (REW-10); its
+    // fold already reads both and the relay already accepts both, so this
+    // ceiling is the last thing that would refuse — and it refuses at the final
+    // publish, long after the code looks finished.
+    //
+    // Peek is here for a reason that is a step removed: it never chooses a
+    // comment kind, it stamps whatever the owning app's manifest declares. So
+    // Ship flipping its manifest changes what *Peek* signs, with no change to
+    // Peek. Granting one without the other breaks the other app.
+    for (const client of ['estiva-ship', 'estiva-peek']) {
+      expect(app(client).allowedKinds).toContain(SHIP.COMMENT)
     }
   })
 
