@@ -107,7 +107,28 @@ export const SEED_APPS: readonly SeedApp[] = [
     // anyone changing a line of Peek. Without this it fails at `/sign` — after
     // the manifest has already offered the action, which is exactly how the
     // kind:1851 case failed in the demo.
-    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111],
+    // 30078 is NIP-78 app-specific data, and it is where read state lives
+    // (CRO-2, and ADR 0001's layer 2). Already in Buzz's ALL_KINDS, so the
+    // relay takes it today and this ceiling is the only gate. No `t`-tag or
+    // URL-prefix constraint applies — `nip98_url_prefixes` is specific to
+    // kind:27235, so there is nothing else to configure.
+    //
+    // 41010/41011/41012 are the DM commands (DMS-1): open a DM, add a member
+    // — which creates a *new* DM with the expanded set — and hide one. kind:9
+    // is already here and is what DM messages themselves are.
+    //
+    // Deliberately NOT 30622. `KIND_DM_VISIBILITY` is relay-signed: the relay
+    // republishes it on every hide, `buzz-core` lists it in
+    // RESULT_GATED_KINDS, and a reader must equal the event's `#p`. Peek only
+    // ever reads its own. Granting it would let Peek forge a visibility
+    // snapshot, and ingest would refuse it anyway as relay-signed-only.
+    //
+    // Deliberately NOT 22242 either, and that one is not an omission — see the
+    // PR. NIP-42 relay auth needs a scoping control in `policy.ts` alongside
+    // the grant (PEE-4), because unqualified it lets Peek mint relay-auth
+    // credentials for any relay at all. The grant without the control is a
+    // widening, so the two land together or not at all.
+    allowedKinds: [9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
   },
@@ -141,7 +162,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // inferred from the registry), and this is the last gate that refuses at
     // the final publish rather than at build time. A ceiling that arrives after
     // the code is the reason PEEK-172 exists.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111],
+    // 30078 for the same reason as Peek (CRO-2): read state is a property of
+    // the person, so both apps write it and neither owns it.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078],
     nip98UrlPrefixes: [],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },
