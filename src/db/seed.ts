@@ -157,8 +157,30 @@ export const SEED_APPS: readonly SeedApp[] = [
     // and nothing arrives — reached down a different path, because here it is
     // the relay refusing rather than `/sign`. Like 9008, it is added before the
     // code that needs it: M3's socket work cannot be tested until it is live.
+    // 30851 is Ship's Issue, and it is the second entry here borrowed from
+    // another app's manifest rather than written by Peek for itself — 1851
+    // above was the first, and this is the same rule one step further.
+    //
+    // PRO-4 made object-creating actions renderable, so Peek now draws Ship's
+    // `add-issue` as a form and publishes the issue itself. Peek does not
+    // choose the kind any more than it chose 1851: `buildActionEvent` takes it
+    // from `emits.kind` in Ship's own manifest. An action a consumer can render
+    // and cannot sign is the worst of both — the form fills in, the parent
+    // resolves, and `/sign` refuses at the last step.
+    //
+    // **Fourth time.** 1851, then 9101, then 9002, now this, and the paragraph
+    // three above already said it: "any further cross-app action Peek offers
+    // will need the same treatment — the kind list has to be the union of what
+    // Peek writes for itself and what the apps it acts on declare." Knowing the
+    // rule did not make anyone apply it, because nothing checks. The standing
+    // fix is for Peek to read `allowed_kinds` off its own token and decline to
+    // offer what it cannot sign, the way `estiva-agent`'s `refuseUnsignable`
+    // does; filed rather than done here, because someone is blocked now.
+    //
+    // Only 30851, not 30850: Ship declares no action that creates a project, so
+    // a ceiling covering one would grant more than any manifest asks for.
     allowedKinds: [
-      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242,
+      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
