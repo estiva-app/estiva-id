@@ -66,6 +66,26 @@ describe('seeded signing policies', () => {
     }
   })
 
+  it('lets Peek sign the object kinds the apps it acts on declare creatable', () => {
+    /*
+      PRO-4 made object-creating actions renderable, so Peek draws Ship's
+      `add-issue` as a form and publishes the issue itself. It does not choose
+      the kind — `buildActionEvent` takes it from `emits.kind` in Ship's own
+      manifest — exactly as it does not choose 1851 for a status change.
+
+      This is the fourth ceiling raised after the fact rather than before it
+      (1851, 9101, 9002, now 30851), and each time the app was correct, the
+      relay was willing, and `/sign` refused at the last step with everything
+      else already agreed. Asserted here so the next borrowed kind is a failing
+      test rather than a screenshot.
+
+      Not 30850: Ship declares no action that creates a project, and a ceiling
+      wider than any manifest asks for grants what nobody requested.
+    */
+    expect(app('estiva-peek').allowedKinds).toContain(SHIP.ISSUE)
+    expect(app('estiva-peek').allowedKinds).not.toContain(SHIP.PROJECT)
+  })
+
   it('lets both apps sign the read-state kind', () => {
     // Read state is a property of the person, not the app (CRO-2, ADR 0001
     // layer 2), so both write it and neither owns it. Granting one would make
