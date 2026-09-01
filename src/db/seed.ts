@@ -180,8 +180,7 @@ export const SEED_APPS: readonly SeedApp[] = [
     // Only 30851, not 30850: Ship declares no action that creates a project, so
     // a ceiling covering one would grant more than any manifest asks for.
     allowedKinds: [
-      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242,
-      30851,
+      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
