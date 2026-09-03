@@ -6,6 +6,7 @@
  * and that a relay failure does not eat the edit.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 import { closePool, query } from '../db/pool.js'
 import { createUserWithKey } from '../domain/users.js'
 import { prepareDatabase, truncateAll } from '../test/db.js'
@@ -146,6 +147,26 @@ describe('publishProfile', () => {
       name: 'Ada',
       nip05: `ada@${HOST}`,
       picture: 'https://example.test/a.png',
+    })
+  })
+
+  /**
+   * SHA-22. The relay's own media URL answers `401` to an `<img>`, and every
+   * consumer of this field is one — so what gets published is the URL this
+   * service serves the bytes from. `users.picture` is left as the record.
+   */
+  it('publishes the servable URL for a picture stored on the relay', async () => {
+    await saveProfile(ada.id, { picture: `https://estiva.estiva.app/media/${'a'.repeat(64)}.jpg` })
+    const calls = stubRelay({ body: { accepted: true, event_id: 'abc' } })
+
+    await publishProfile(ada.id)
+
+    const event = calls[0]?.body as { content: string }
+    const published = JSON.parse(event.content).picture as string
+    expect(published).toBe(`${config().ISSUER_URL}/avatar/${'a'.repeat(64)}.jpg`)
+    // The record is untouched — the mapping is an egress concern.
+    await expect(getProfile(ada.id)).resolves.toMatchObject({
+      picture: `https://estiva.estiva.app/media/${'a'.repeat(64)}.jpg`,
     })
   })
 

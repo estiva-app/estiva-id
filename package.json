@@ -23,6 +23,8 @@
     "seed": "tsx src/db/seed.ts",
     "seed:prod": "node dist/db/seed.js",
     "invite": "tsx src/admin/create-invite.ts",
+    "avatars:republish": "tsx src/admin/republish-avatars.ts",
+    "avatars:republish:prod": "node dist/admin/republish-avatars.js",
     "invite:prod": "node dist/admin/create-invite.js",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"

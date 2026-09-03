@@ -12,6 +12,7 @@ import { type Logger, logger } from '../logger.js'
 import { adminRoutes } from './routes/admin.js'
 import { authRoutes } from './routes/auth.js'
 import { authorizeRoutes } from './routes/authorize.js'
+import { avatarRoutes } from './routes/avatar.js'
 import { directoryRoutes } from './routes/directory.js'
 import { inviteRoutes } from './routes/invites.js'
 import { logoutRoutes } from './routes/logout.js'
@@ -77,6 +78,7 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', signRoutes())
   app.route('/', nip44Routes())
   app.route('/', profileRoutes())
+  app.route('/', avatarRoutes())
   app.route('/', adminRoutes())
   app.route('/', directoryRoutes())
 

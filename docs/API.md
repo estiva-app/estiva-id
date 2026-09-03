@@ -121,6 +121,7 @@ the key through an internal path rather than through that endpoint.
 | `GET` | `/me/profile` | Session | `{ displayName, picture, handle, communityHost, nip05, pubkey }`. |
 | `PUT` | `/me/profile` | Session | Partial update, then publish. `409` if the handle is taken; `403` once the identity is not `active`. |
 | `PUT` | `/me/avatar` | Session | Raw image bytes. Uploads to the relay, stores the URL as `picture`, republishes. |
+| `GET` | `/avatar/:sha256.:ext` | **None** | The published `picture`. Streams the relay blob, signing the read. |
 
 ```json
 { "displayName": "Ada", "picture": "https://…/a.png", "handle": "ada" }
@@ -291,13 +292,17 @@ PNG, JPEG, WebP or GIF, up to 5 MB. **SVG is refused**: it is a document that ca
 carry script, and an avatar renders in every app in the suite.
 
 ```json
-{ "profile": { … }, "avatar": { "url": "…", "sha256": "…", "size": 8134 },
+{ "profile": { … },
+  "avatar": { "url": "https://id.estiva.app/avatar/<sha256>.jpg",
+              "blobUrl": "https://estiva.estiva.app/media/<sha256>.jpg",
+              "sha256": "…", "size": 8134 },
   "published": true, "eventId": "…" }
 ```
 
-The URL is content-addressed and served by the workspace's own relay, which is
-the point — Stage 0 published a Convex storage URL, tying an ecosystem-wide
-avatar to one deployment's lifetime.
+The URL is content-addressed, which is the point — Stage 0 published a Convex
+storage URL, tying an ecosystem-wide avatar to one deployment's lifetime. `url`
+is where a browser can load it and `blobUrl` is where the bytes are; see
+`GET /avatar/…` below for why those are two different things.
 
 **The upload must succeed before anything is written.** A `picture` pointing at
 a blob that was never stored is a broken avatar in every app at once. After that
@@ -329,6 +334,120 @@ being admitted to it and without storing anything.
 The upload is signed **here**, not in the browser: the key is custodied, and
 minting a Blossom token through `/sign` is exactly the rubber stamp `/sign` was
 constrained to refuse.
+
+### `GET /avatar/:sha256.:ext`
+
+The URL published as `picture`, and the only one a browser can load.
+
+**Unauthenticated.** The caller is an `<img>` on `peek.estiva.app` or
+`ship.estiva.app`: it sends no `Authorization`, and under `SameSite` it sends no
+session cookie cross-site either. What replaces per-viewer authorisation is a
+narrowing — **a hash is served only while some identity's `picture` still refers
+to it**, so this is not a door onto the media store. Buzz's own
+feedback-attachment route is built the same way: unreferenced hashes collapse to
+`404`.
+
+Any identity, not only an active one. A leaver's messages stay attributed to
+them in both apps, so filtering to `active` would blank the face on every
+message they ever sent while their name stayed — a different regression, in
+service of hiding the least sensitive half. Offboarding revokes what it is
+supposed to: the `nip05` attestation, and relay admission. `avatars:republish`
+*does* filter to active, for the unrelated reason that re-signing a leaver's
+`kind:0` would second-guess a decision already made and audited.
+
+Responses are `public, max-age=31536000, immutable` and `nosniff`. Cacheable at
+any length because the URL names the bytes — and necessarily so, since the
+alternative is a signed relay round trip for every avatar in every render.
+
+| Condition | HTTP |
+| --- | --- |
+| Not a blob path, no identity references that hash, or the store does not hold it | 404 |
+| `RELAY_OPERATOR_USER_ID` is unset | 500, `detail.reason = no_operator` |
+| The operator key is not admitted to the relay | 500, `detail.reason = not_admitted` |
+| Media store refused or unreachable | 500 |
+
+A hash nobody references and a hash the store does not hold give **the same**
+`404`, so this cannot be used to test whether particular bytes exist.
+
+#### Why the bytes come through here at all (SHA-22)
+
+Buzz used to serve `/media/*` unauthenticated behind
+`BUZZ_REQUIRE_MEDIA_GET_AUTH`. Upstream removed that path in `fix(media):
+require authenticated reads` and listed both spellings of the variable as
+**inert** — so there is no longer a setting an operator can change. Production
+reports relay `0.2.1`, which exists only from that merge onward, and answers a
+well-formed `/media/<sha256>.jpg` with `401`.
+
+A browser cannot satisfy that. `<img src>` sends no headers, and Buzz's
+`extract_blossom_auth` reads the `Authorization` header only — there is no
+query-parameter or cookie form of the credential. So *no* app could display an
+avatar, however the workspace was configured: every uploaded picture fell back
+to initials in Peek and Ship, and this service's own profile page showed a
+broken image for a photo it had just stored. Message attachments were unaffected
+because Peek keeps those in Convex, which never touches this store.
+
+Handing the browser a credential is what this service exists to avoid, so the
+read is signed here instead — `t=get`, scoped to the one hash *and* this host,
+by the **relay operator** key rather than the viewer's. `scripts/probe-blossom-read.ts`
+verifies that token against the live relay the same way the upload probe does,
+including the control that an unauthenticated `GET` is `401`.
+
+#### What `picture` holds, and what is published
+
+`users.picture` keeps the relay's content-addressed URL — that is the record,
+and the bytes really are there. `avatarDisplayUrl` maps it to this route on the
+way out, so both the published `kind:0` and `GET /me/profile` carry the loadable
+URL. The hash survives into it, so an app that has only the published URL can
+still derive the relay blob.
+
+**A deploy needs one manual step.** A `kind:0` already on the relay is a copy,
+and it still names the `/media/` URL that answers `401` — which is the string
+Ship and Peek read. `pnpm avatars:republish` (dry run) / `APPLY=1` re-emits
+them; kind:0 is replaceable, so it is a rewrite and safe to run twice.
+
+## Ending a session from an app
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/logout` | — | RP-initiated logout. Revokes the session and redirects back. |
+
+```
+/logout?client_id=…&post_logout_redirect_uri=…&state=…
+```
+
+`POST /auth/logout` cannot be reached from another origin — the cookie is
+`SameSite=Lax` and no CORS is served, so a cross-origin `POST` carries no
+session and logs nobody out. This is the same constraint that made `/authorize`
+a redirect, with the same answer: a top-level navigation (PEEK-122).
+
+`post_logout_redirect_uri` is validated against **the same registered list as
+`/authorize`**, exact-match, before anything is revoked. This endpoint answers
+without a session, so an unvalidated URI would be an open redirector that needs
+no credentials at all to reach.
+
+**Idempotent.** Logging out a browser that has no session is a `302`, not a
+`401` — the caller's intent is "make there be no session", and there being none
+already satisfies it.
+
+**It does not revoke tokens already issued.** Access tokens are stateless JWTs
+living up to `JWT_TTL_SECONDS`, so an app tab that is already open keeps working
+until its expires. What this guarantees is narrower and exact: **no new entry
+succeeds.** Every app asks for a passkey the next time it boots. Closing the
+remaining window needs PEEK-108 or a per-call revocation check.
+
+A `GET` end-session endpoint is CSRF-able — a third party can force a logout.
+That is the accepted shape of OIDC RP-initiated logout: nothing is disclosed,
+the impact is annoyance, and a form POST from the app's origin cannot carry the
+cookie here anyway.
+
+## Tokens and discovery
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/.well-known/openid-configuration` | — | Discovery, including `end_session_endpoint`. |
+| `GET` | `/.well-known/jwks.json` | — | Active key plus any `previous` one. |
+| `GET` | `/authorize` | Session | Browser redirect. Issues an authorization code. |
+| `POST` | `/token` | Session, code **or** client secret | Three grants — see below. |
 
 ### `GET /admin/audit`
 
@@ -457,49 +576,6 @@ so does this. Refused with `400` for an identity that is not `active`
 (`not_active`) — admitting somebody this service has disabled would re-open the
 half offboarding closed — or that holds no key (`no_key`).
 
-## Ending a session from an app
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| `GET` | `/logout` | — | RP-initiated logout. Revokes the session and redirects back. |
-
-```
-/logout?client_id=…&post_logout_redirect_uri=…&state=…
-```
-
-`POST /auth/logout` cannot be reached from another origin — the cookie is
-`SameSite=Lax` and no CORS is served, so a cross-origin `POST` carries no
-session and logs nobody out. This is the same constraint that made `/authorize`
-a redirect, with the same answer: a top-level navigation (PEEK-122).
-
-`post_logout_redirect_uri` is validated against **the same registered list as
-`/authorize`**, exact-match, before anything is revoked. This endpoint answers
-without a session, so an unvalidated URI would be an open redirector that needs
-no credentials at all to reach.
-
-**Idempotent.** Logging out a browser that has no session is a `302`, not a
-`401` — the caller's intent is "make there be no session", and there being none
-already satisfies it.
-
-**It does not revoke tokens already issued.** Access tokens are stateless JWTs
-living up to `JWT_TTL_SECONDS`, so an app tab that is already open keeps working
-until its expires. What this guarantees is narrower and exact: **no new entry
-succeeds.** Every app asks for a passkey the next time it boots. Closing the
-remaining window needs PEEK-108 or a per-call revocation check.
-
-A `GET` end-session endpoint is CSRF-able — a third party can force a logout.
-That is the accepted shape of OIDC RP-initiated logout: nothing is disclosed,
-the impact is annoyance, and a form POST from the app's origin cannot carry the
-cookie here anyway.
-
-## Tokens and discovery
-
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| `GET` | `/.well-known/openid-configuration` | — | Discovery, including `end_session_endpoint`. |
-| `GET` | `/.well-known/jwks.json` | — | Active key plus any `previous` one. |
-| `GET` | `/authorize` | Session | Browser redirect. Issues an authorization code. |
-| `POST` | `/token` | Session, code **or** client secret | Three grants — see below. |
 
 ### Three grants, and why each exists
 

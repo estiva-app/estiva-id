@@ -10,7 +10,12 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { config } from '../../config.js'
 import { recordAudit } from '../../domain/audit.js'
-import { AvatarRejected, MAX_AVATAR_BYTES, setAvatar } from '../../domain/avatar.js'
+import {
+  AvatarRejected,
+  MAX_AVATAR_BYTES,
+  avatarDisplayUrl,
+  setAvatar,
+} from '../../domain/avatar.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { offboardPerson } from '../../domain/offboarding.js'
 import {
@@ -63,7 +68,11 @@ function present(profile: Awaited<ReturnType<typeof getProfile>>, pubkey: string
   if (!profile) return undefined
   return {
     displayName: profile.displayName,
-    picture: profile.picture,
+    // The loadable URL, for the same reason the published `kind:0` carries it
+    // (SHA-22): this service's own profile page renders it in an `<img>`, and
+    // the relay URL is the one that answers `401` there. It showed a broken
+    // image for the photo it had just stored.
+    picture: avatarDisplayUrl(profile.picture),
     handle: profile.handle,
     communityHost: profile.communityHost ?? (config().COMMUNITY_HOST || null),
     nip05: nip05Value(profile) ?? null,
@@ -334,7 +343,15 @@ export function profileRoutes(): Hono<AppEnv> {
       })
       return c.json({
         profile: present(await getProfile(userId), await getActivePubkey(userId)),
-        avatar: { url: outcome.url, sha256: outcome.sha256, size: outcome.size },
+        // `url` is the loadable one — the client puts it straight in an `<img>`
+        // after an upload. `blobUrl` keeps the relay's own address visible, so
+        // the record and what is served stay legibly two different things.
+        avatar: {
+          url: avatarDisplayUrl(outcome.url),
+          blobUrl: outcome.url,
+          sha256: outcome.sha256,
+          size: outcome.size,
+        },
         published: outcome.published,
         eventId: outcome.eventId ?? null,
         ...(outcome.published ? {} : { publishError: outcome.publishError ?? null }),
