@@ -20,6 +20,7 @@ import { type ProfileFields, buildProfile } from '../nostr/event.js'
 import { signEvent } from '../nostr/keys.js'
 import { publishEvent, relayBridgeUrl } from '../nostr/relay.js'
 import { recordAudit } from './audit.js'
+import { avatarDisplayUrl } from './avatar-url.js'
 import { withUserSecretKey } from './keys.js'
 
 /** NIP-05 restricts the local part; the relay resolves `?name=` case-insensitively. */
@@ -182,7 +183,18 @@ export async function publishProfile(
     display_name: profile.displayName ?? undefined,
     // Both spellings, because consumers read either one — see buildProfile.
     name: profile.displayName ?? undefined,
-    picture: profile.picture ?? undefined,
+    /*
+      Mapped on the way out, not on the way in (SHA-22). `users.picture` stays
+      the relay's content-addressed URL — that is the record, and the media
+      store is where the bytes actually are. What a consumer needs is a URL a
+      browser can load, and every consumer of this field is a browser: Buzz
+      requires a signed header on `/media/*` that an `<img>` cannot send.
+
+      Doing it here means one line makes every republish converge, including
+      the ones nobody asks for — an offboarding, a handle change, a re-run of
+      the backfill.
+    */
+    picture: avatarDisplayUrl(profile.picture) ?? undefined,
     nip05: nip05Value(profile),
   }
 

@@ -16,10 +16,43 @@
  * minting a Blossom token through `/sign`, which is exactly the "rubber stamp"
  * `/sign` was constrained to refuse. So the bytes come here and this service
  * signs for its own user, the same internal path `publishProfile` takes.
+ *
+ * ## Why the *read* happens here too (SHA-22)
+ *
+ * The same argument, arrived at from the other end. Buzz used to serve
+ * `/media/*` unauthenticated behind `BUZZ_REQUIRE_MEDIA_GET_AUTH`; upstream
+ * removed that path and made both spellings of the variable inert, so every
+ * read now needs a signed kind:24242 `t=get` event in an `Authorization`
+ * header. An `<img>` sends no headers and Buzz accepts the credential nowhere
+ * else — no query parameter, no cookie — so *no browser* could display an
+ * avatar, in any app, however the workspace was configured. Every uploaded
+ * picture fell back to initials, and Estiva ID's own profile page showed a
+ * broken image for a photo it had just stored.
+ *
+ * Handing the browser a credential is the thing this service exists to avoid,
+ * so the bytes come back through here instead: {@link readAvatar} signs as the
+ * relay operator and streams the blob. `picture` is published as this service's
+ * URL rather than the relay's — see {@link avatarDisplayUrl}, which keeps the
+ * hash in the path so the relay URL is still derivable from it.
+ *
+ * **This is not a general media proxy**, and the difference is load-bearing.
+ * It serves a hash only while some identity's `picture` still refers to it, so
+ * it cannot be used to fish for blobs that were never avatars. Buzz's own
+ * feedback-attachment route is built the same way and for the same reason:
+ * "unknown feedback, unreferenced hashes ... all collapse to `404`".
  */
-import { uploadBlob } from '../nostr/blossom.js'
+import { queryOne } from '../db/pool.js'
+import {
+  type BlobPath,
+  type FetchBlobResult,
+  fetchBlob,
+  parseBlobPath,
+  uploadBlob,
+} from '../nostr/blossom.js'
 import { recordAudit } from './audit.js'
+import { AVATAR_PATH, avatarDisplayUrl } from './avatar-url.js'
 import { withUserSecretKey } from './keys.js'
+import { NoOperatorIdentity, withOperatorSecretKey } from './operator-key.js'
 import { publishProfile, saveProfile } from './profile.js'
 
 /**
@@ -40,6 +73,8 @@ const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/g
  * that out before spending the bandwidth is cheap.
  */
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
+export { AVATAR_PATH, avatarDisplayUrl }
 
 export class AvatarRejected extends Error {
   constructor(
@@ -138,4 +173,98 @@ export async function setAvatar(
     eventId: outcome.eventId,
     publishError: outcome.published ? undefined : outcome.reason,
   }
+}
+
+export type AvatarRead =
+  | {
+      ok: true
+      body: ReadableStream<Uint8Array> | null
+      contentType: string
+      contentLength: string | null
+    }
+  | {
+      ok: false
+      reason:
+        | 'not_an_avatar'
+        | 'not_found'
+        | 'no_operator'
+        | 'not_admitted'
+        | 'refused'
+        | 'unreachable'
+      message: string
+    }
+
+/**
+ * Whether any identity's picture still refers to these bytes.
+ *
+ * **Any** identity, not only an active one. A leaver's messages stay attributed
+ * to them in both apps, so filtering to `active` would blank the face on every
+ * message they ever sent while their name stayed — a different regression, in
+ * service of hiding the least sensitive half. Offboarding revokes what it is
+ * meant to: the `nip05` attestation, and relay admission.
+ *
+ * Matched on the hash rather than on a whole URL, deliberately: rows written
+ * before this existed hold the relay's URL and rows written after hold this
+ * service's, and a check keyed to either shape would quietly stop admitting
+ * half of them the first time the other shape appeared. A 64-hex hash contains
+ * no `like` metacharacter and is validated before it gets here, so containment
+ * is both safe and the most durable question to ask.
+ */
+async function isReferencedAvatar(sha256: string): Promise<boolean> {
+  const row = await queryOne<{ one: number }>(
+    "select 1 as one from users where picture like '%' || $1 || '%' limit 1",
+    [sha256],
+  )
+  return row !== undefined
+}
+
+/**
+ * Stream one stored avatar back, signing the read as the relay operator.
+ *
+ * Signed as the operator rather than as the viewer because the viewer is an
+ * `<img>` on another origin: it carries no session and, under `SameSite`, no
+ * cookie either. The narrowing that replaces per-viewer authorisation is
+ * {@link isReferencedAvatar} — an unreferenced hash is refused before a token
+ * is ever minted, so the operator's membership cannot be borrowed to read
+ * anything that is not currently somebody's profile picture.
+ */
+export async function readAvatar(
+  segment: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AvatarRead> {
+  const path: BlobPath | null = parseBlobPath(segment)
+  if (!path) return { ok: false, reason: 'not_an_avatar', message: 'Not a blob path' }
+
+  if (!(await isReferencedAvatar(path.sha256))) {
+    // Deliberately the same answer as a hash the relay does not hold: whether
+    // these particular bytes exist is not something an unauthenticated caller
+    // should be able to probe for.
+    return { ok: false, reason: 'not_an_avatar', message: 'No profile picture with that hash' }
+  }
+
+  /*
+    A deployment with no `RELAY_OPERATOR_USER_ID` cannot sign a read at all.
+    Caught rather than thrown so it does not surface as "unhandled error" on
+    every avatar in the workspace — the log line that says which of these it is
+    is the whole difference between a minute and an afternoon.
+  */
+  let result: FetchBlobResult
+  try {
+    result = await withOperatorSecretKey((secretKey) => fetchBlob(path, secretKey, options))
+  } catch (error) {
+    if (error instanceof NoOperatorIdentity) {
+      return { ok: false, reason: 'no_operator', message: error.message }
+    }
+    throw error
+  }
+
+  if (result.ok) {
+    return {
+      ok: true,
+      body: result.body,
+      contentType: result.contentType,
+      contentLength: result.contentLength,
+    }
+  }
+  return { ok: false, reason: result.reason, message: result.message }
 }
