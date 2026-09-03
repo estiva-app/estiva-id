@@ -20,7 +20,7 @@ const ROLES = [
 ]
 
 const meta = {
-  title: 'Primitives/Select',
+  title: 'Admin/Select',
   component: Select,
   decorators: estivaId,
   parameters: { ...estivaIdParameters, layout: 'centered' },
