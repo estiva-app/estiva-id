@@ -177,10 +177,18 @@ export const SEED_APPS: readonly SeedApp[] = [
     // offer what it cannot sign, the way `estiva-agent`'s `refuseUnsignable`
     // does; filed rather than done here, because someone is blocked now.
     //
+    // 40003 is Buzz's message edit (`KIND_STREAM_MESSAGE_EDIT`), and Peek needs
+    // it for CON-8. Peek already *has* an edit control; `editBody` patches the
+    // Convex row and publishes nothing, so a human edit never leaves the app
+    // and every other reader keeps showing the old text. That is a grant
+    // arriving to fix a feature that looks finished rather than to enable a new
+    // one.
+    //
     // Only 30851, not 30850: Ship declares no action that creates a project, so
     // a ceiling covering one would grant more than any manifest asks for.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
+      40003,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
@@ -231,7 +239,27 @@ export const SEED_APPS: readonly SeedApp[] = [
     // message the signer could not already read, and it changes nothing about
     // the message it points at. Taking one back is a kind:5, which is already
     // here.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7],
+    // 40003 is Buzz's message edit (`KIND_STREAM_MESSAGE_EDIT`), for CON-4.
+    // Neither app can edit a comment today and both are about to learn how, so
+    // the grant lands before the code — the same call as 1111 above, and for
+    // the same reason: this is the gate that refuses at the final publish
+    // rather than at build time.
+    //
+    // **This one is genuinely broader than the reaction above, and it is worth
+    // not smoothing over.** A kind:7 cannot change what a message says; an edit
+    // is exactly that. What bounds it is not the kind but the relay:
+    // `validate_edit_ownership` accepts the target's effective author, or the
+    // NIP-OA owner of an authoring agent — and for the author path it re-checks
+    // channel membership, so somebody removed from a private channel cannot
+    // rewrite what they said while they were in it. A kind ceiling cannot
+    // express any of that, which is why the ceiling is the wrong place to look
+    // for the limit.
+    //
+    // Channel-scoped: 40003 is in the relay's `requires_h_channel_scope`, so an
+    // edit without an `h` is refused with `accepted: false` even though the
+    // kind is allowed here and the signature is fine. Two separate gates, and
+    // this list is only the first.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003],
     nip98UrlPrefixes: [],
     // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
     // so it has nothing to authenticate. Empty rather than the deployment's

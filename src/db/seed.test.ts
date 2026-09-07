@@ -34,6 +34,12 @@ const SHIP = {
   COMMENT: 1111,
 } as const
 
+/** Buzz's own kinds, named here because neither app owns them. */
+const BUZZ = {
+  /** `KIND_STREAM_MESSAGE_EDIT` — an edit is a new event, never a rewrite. */
+  MESSAGE_EDIT: 40003,
+} as const
+
 describe('seeded signing policies', () => {
   it('lets Ship sign the Folder every object requires', () => {
     // The regression: `createProject` publishes the Folder *before* the
@@ -211,5 +217,28 @@ describe('seeded signing policies', () => {
     for (const seeded of SEED_APPS) {
       expect(seeded.allowedKinds).not.toContain(0)
     }
+  })
+
+  it('lets both apps sign the message edit, because an edit is a new event', () => {
+    // CON-4 and CON-8. A kind:9 and a kind:1111 are both non-replaceable, so an
+    // edit cannot overwrite what it edits — it is a separate kind:40003 naming
+    // its target, and an app without the grant can only patch its own database.
+    // Peek does exactly that today: `editBody` publishes nothing, so a human
+    // edit never leaves the app and every other reader keeps the old text.
+    //
+    // Both apps or neither. One app able to publish an edit the other cannot is
+    // the asymmetry CON-4 exists to prevent, and it would be invisible until
+    // somebody edited a comment and watched it not travel.
+    for (const client of ['estiva-peek', 'estiva-ship']) {
+      expect(app(client).allowedKinds).toContain(BUZZ.MESSAGE_EDIT)
+    }
+  })
+
+  it('does not grant the edit to the agent, which has no comments to edit', () => {
+    // The ceiling is a union of what an identity writes, not a convenience.
+    // `claude-agent` files and comments through Ship's own kinds; nothing in it
+    // edits a published message, so granting this would widen it for nobody.
+    const agent = SEED_APPS.find((seeded) => seeded.clientId === 'claude-agent')
+    if (agent) expect(agent.allowedKinds).not.toContain(BUZZ.MESSAGE_EDIT)
   })
 })
