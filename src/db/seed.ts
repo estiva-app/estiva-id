@@ -218,7 +218,20 @@ export const SEED_APPS: readonly SeedApp[] = [
     // the code is the reason PEEK-172 exists.
     // 30078 for the same reason as Peek (CRO-2): read state is a property of
     // the person, so both apps write it and neither owns it.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078],
+    //
+    // 7 is NIP-25, and Ship needs it for CON-2. Peek has had it since it was
+    // seeded; Ship has never had it, which is why Ship has no reactions at all
+    // rather than broken ones. **Reading them needs no grant** — a `kind:7` is
+    // fetched by target and Ship already renders what Peek wrote — so this is
+    // only about the half where a person clicks.
+    //
+    // Narrow by construction, and worth saying because "may sign a reaction"
+    // sounds broader than it is: a kind:7 names one target event and carries an
+    // emoji, and Buzz derives its channel from that target. It cannot reach a
+    // message the signer could not already read, and it changes nothing about
+    // the message it points at. Taking one back is a kind:5, which is already
+    // here.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7],
     nip98UrlPrefixes: [],
     // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
     // so it has nothing to authenticate. Empty rather than the deployment's
