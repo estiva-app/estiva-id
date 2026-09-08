@@ -295,7 +295,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // authenticated, so without this Ship cannot display an attachment Peek
     // posted, which is SHI-1's screenshot half. Uploading from Ship (SHI-2)
     // uses the same grant.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242],
+    allowedKinds: [
+      30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242,
+    ],
     nip98UrlPrefixes: [],
     // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
     // so it has nothing to authenticate. Empty rather than the deployment's
