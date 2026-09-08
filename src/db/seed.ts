@@ -186,9 +186,20 @@ export const SEED_APPS: readonly SeedApp[] = [
     //
     // Only 30851, not 30850: Ship declares no action that creates a project, so
     // a ceiling covering one would grant more than any manifest asks for.
+    //
+    // **Fifth time**, and the paragraph above predicted it. 1852 is the Folder
+    // command: a client asks the relay to change a Folder's contents and the
+    // relay emits the state it signs itself (RFC 0.4 §4.1). Both apps navigate
+    // by Folder, so both write it — this is not a cross-app grant like 30851,
+    // it is a kind neither app owns and both use.
+    //
+    // Only 1852, not 30890. The state event is relay-signed by construction and
+    // `is_relay_only_kind` refuses it from any client, so granting it here
+    // would hand an app a kind the relay would reject anyway — a ceiling wider
+    // than the wire, which is the shape that makes a refusal hard to read.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003,
+      40003, 1852,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
@@ -259,7 +270,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // edit without an `h` is refused with `accepted: false` even though the
     // kind is allowed here and the signature is fine. Two separate gates, and
     // this list is only the first.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003],
+    // 1852 is the Folder command, for the reason recorded on Peek's list above.
+    // Not 30890: the state is the relay's to sign.
+    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852],
     nip98UrlPrefixes: [],
     // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
     // so it has nothing to authenticate. Empty rather than the deployment's
