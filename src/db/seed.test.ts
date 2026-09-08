@@ -38,6 +38,10 @@ const SHIP = {
 const BUZZ = {
   /** `KIND_STREAM_MESSAGE_EDIT` — an edit is a new event, never a rewrite. */
   MESSAGE_EDIT: 40003,
+  /** `KIND_FOLDER_COMMAND` — a client asks; the relay signs the state. */
+  FOLDER_COMMAND: 1852,
+  /** `KIND_FOLDER_STATE` — relay-signed, and refused from every client. */
+  FOLDER_STATE: 30890,
 } as const
 
 describe('seeded signing policies', () => {
@@ -240,5 +244,24 @@ describe('seeded signing policies', () => {
     // edits a published message, so granting this would widen it for nobody.
     const agent = SEED_APPS.find((seeded) => seeded.clientId === 'claude-agent')
     if (agent) expect(agent.allowedKinds).not.toContain(BUZZ.MESSAGE_EDIT)
+  })
+})
+
+describe('the Folder command', () => {
+  it('is signable by both apps, because both navigate by Folder', () => {
+    // Not a cross-app grant like Peek's 30851: 1852 is a kind neither app owns
+    // and both write, the way 9007 already is.
+    for (const client of ['estiva-peek', 'estiva-ship'] as const) {
+      expect(app(client).allowedKinds).toContain(BUZZ.FOLDER_COMMAND)
+    }
+  })
+
+  it('does not grant the state kind to anybody', () => {
+    // `is_relay_only_kind` refuses a 30890 from any client, so a ceiling that
+    // allowed it would be wider than the wire — and a refusal whose reason is
+    // in a different service is the hardest kind to read.
+    for (const client of ['estiva-peek', 'estiva-ship'] as const) {
+      expect(app(client).allowedKinds).not.toContain(BUZZ.FOLDER_STATE)
+    }
   })
 })
