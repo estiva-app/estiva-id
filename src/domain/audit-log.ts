@@ -53,6 +53,18 @@ export interface AuditQuery {
   userId?: string | undefined
   /** Exact action, e.g. `user.status_change`. */
   action?: string | undefined
+  /**
+   * Restrict to a set of actions, applied **in the query**.
+   *
+   * This exists because filtering a page after fetching it is not the same
+   * question. `/me/security-events` shows seven rare actions — enrolling a
+   * passkey, a recovery, a session — while every `POST /sign` and every
+   * `POST /token` writes a row too. An app signing each message, reaction and
+   * read-state publish fills the newest page entirely, so "the newest 50, then
+   * keep the interesting ones" answers **nothing at all** within a few minutes
+   * of ordinary use.
+   */
+  actions?: readonly string[] | undefined
   /** Keyset pagination: return entries older than this id. */
   before?: string | undefined
   limit?: number | undefined
@@ -127,10 +139,18 @@ export async function listAudit(filter: AuditQuery = {}): Promise<AuditEntry[]> 
              or a.actor_user_id = $1::uuid
              or sk.user_id = $1::uuid)
         and ($2::text is null or a.action = $2::text)
+        -- Applied here rather than to the page it returns; see the actions field.
+        and ($5::text[] is null or a.action = any($5::text[]))
         and ($3::bigint is null or a.id < $3::bigint)
       order by a.id desc
       limit $4`,
-    [filter.userId ?? null, filter.action ?? null, filter.before ?? null, limit],
+    [
+      filter.userId ?? null,
+      filter.action ?? null,
+      filter.before ?? null,
+      limit,
+      filter.actions && filter.actions.length > 0 ? [...filter.actions] : null,
+    ],
   )
 
   return result.rows.map((row) => ({
