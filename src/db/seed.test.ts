@@ -138,12 +138,23 @@ describe('seeded signing policies', () => {
     expect(app('estiva-peek').allowedKinds).toContain(22242)
   })
 
-  it('does not let Ship sign relay auth', () => {
-    // Ship reads the relay over the HTTP bridge and opens no socket, so it has
-    // no challenge to answer. Asserted rather than left absent because the
-    // natural instinct on the next socket ticket is to grant both apps at once.
-    expect(app('estiva-ship').allowedKinds).not.toContain(22242)
-    expect(app('estiva-ship').relayAuthUrls()).toEqual([])
+  it('lets Ship sign relay auth, scoped the same way Peek is', () => {
+    // This assertion used to be its inverse, named "does not let Ship sign
+    // relay auth", because Ship opened no socket and so had no challenge to
+    // answer. LIV-1 measured the socket it is about to open and PER-3 adopts
+    // it, so the premise is gone; the pairing above is what keeps the reversal
+    // from being an unscoped grant.
+    //
+    // Scoped from the deployment bound and nowhere else, for the reason the
+    // Peek case below gives: a list from any other source would read as an
+    // independent grant rather than as a narrowing of one.
+    expect(app('estiva-ship').allowedKinds).toContain(22242)
+    expect(app('estiva-ship').relayAuthUrls()).toEqual([...config().SIGN_RELAY_AUTH_ALLOWED_URLS])
+    //
+    // Deliberately no `toBeGreaterThan(0)` here. Under vitest that length is
+    // the fixture in `src/test/setup.ts`, so asserting it would test the
+    // fixture and read as though it had settled the deployment — which is the
+    // one thing this file cannot do. The box is where that is checked.
   })
 
   it('scopes Peek to the deployment’s relays and nothing wider', () => {
