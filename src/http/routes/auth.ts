@@ -635,11 +635,26 @@ export function authRoutes(): Hono<AppEnv> {
    */
   routes.get('/me/security-events', requireSession, async (c) => {
     const { userId } = c.get('session')
-    const entries = await listAudit({ userId, limit: 50 })
+    /*
+      Filtered IN the query, and that is the whole bug this fixed.
+
+      It used to ask for the newest 50 rows for this person and then keep the
+      ones in `SELF_VISIBLE_ACTIONS`. But every `POST /sign` writes
+      `sign.granted` and every `POST /token` writes `token.issue` /
+      `token.exchange` / `token.refresh` — and Peek and Ship sign every message,
+      reaction, edit and read-state publish. So an ordinary account's newest 50
+      rows are entirely app traffic, all seven interesting actions are older than
+      the window, and this answered `[]`.
+
+      It looked intermittent rather than broken, which is why it survived: right
+      after signing in a `session.create` sits in the window, so you see one
+      entry — and a handful of actions later it is gone for good. Reported that
+      way, as "I once or twice saw some logs but they disappear".
+    */
+    const entries = await listAudit({ userId, actions: [...SELF_VISIBLE_ACTIONS], limit: 50 })
 
     return c.json({
       events: entries
-        .filter((entry) => SELF_VISIBLE_ACTIONS.has(entry.action))
         .map((entry) => ({
           id: entry.id,
           occurredAt: entry.occurredAt,
