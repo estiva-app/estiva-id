@@ -654,18 +654,17 @@ export function authRoutes(): Hono<AppEnv> {
     const entries = await listAudit({ userId, actions: [...SELF_VISIBLE_ACTIONS], limit: 50 })
 
     return c.json({
-      events: entries
-        .map((entry) => ({
-          id: entry.id,
-          occurredAt: entry.occurredAt,
-          action: entry.action,
-          outcome: entry.outcome,
-          // Who did it, when that was somebody else. Naming the admin is the
-          // point — "an admin" is not something a person can follow up on.
-          actorEmail: entry.actorUserId === userId ? null : entry.actorEmail,
-          actorDisplayName: entry.actorUserId === userId ? null : entry.actorDisplayName,
-          bySomeoneElse: entry.actorUserId !== null && entry.actorUserId !== userId,
-        })),
+      events: entries.map((entry) => ({
+        id: entry.id,
+        occurredAt: entry.occurredAt,
+        action: entry.action,
+        outcome: entry.outcome,
+        // Who did it, when that was somebody else. Naming the admin is the
+        // point — "an admin" is not something a person can follow up on.
+        actorEmail: entry.actorUserId === userId ? null : entry.actorEmail,
+        actorDisplayName: entry.actorUserId === userId ? null : entry.actorDisplayName,
+        bySomeoneElse: entry.actorUserId !== null && entry.actorUserId !== userId,
+      })),
     })
   })
 
