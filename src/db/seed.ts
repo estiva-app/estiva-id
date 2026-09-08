@@ -197,9 +197,27 @@ export const SEED_APPS: readonly SeedApp[] = [
     // `is_relay_only_kind` refuses it from any client, so granting it here
     // would hand an app a kind the relay would reject anyway — a ceiling wider
     // than the wire, which is the shape that makes a refusal hard to read.
+    // 24242 is Blossom authorization, and it is **27235 for blobs** rather than
+    // a new kind of power. Like NIP-98 it is never stored: it is signed, put in
+    // an `Authorization: Nostr <base64url(event)>` header, and read once. The
+    // relay's media routes take nothing else — `PUT /upload` for the bytes and
+    // `GET /media/{sha256}` for them back, both refused without it.
+    //
+    // **Reading needs it too, which is the half that surprises.** Media GET is
+    // unconditionally authenticated on the deployed relay: the
+    // `BUZZ_REQUIRE_MEDIA_GET_AUTH` flag is inert on `nfb-demo-kinds`, and a
+    // GET with no header answers 401 rather than 404 (probed 2026-09-08). So an
+    // app cannot even *display* an attachment somebody else posted without
+    // this, which is why Ship gets it as well as Peek (CON-12).
+    //
+    // Narrow by construction, and worth stating because "may sign an upload
+    // authorization" sounds broad: each event names one verb (`t upload` or
+    // `t get`), one blob (`x <sha256>`), and carries an `expiration`. It
+    // authorises one action on one already-hashed blob, and the relay checks
+    // membership on top of it.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852,
+      40003, 1852, 24242,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
@@ -272,7 +290,14 @@ export const SEED_APPS: readonly SeedApp[] = [
     // this list is only the first.
     // 1852 is the Folder command, for the reason recorded on Peek's list above.
     // Not 30890: the state is the relay's to sign.
-    allowedKinds: [30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852],
+    // 24242 is Blossom authorization — see Peek's entry above for the shape.
+    // Ship gets it for the READ half first: media GET is unconditionally
+    // authenticated, so without this Ship cannot display an attachment Peek
+    // posted, which is SHI-1's screenshot half. Uploading from Ship (SHI-2)
+    // uses the same grant.
+    allowedKinds: [
+      30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242,
+    ],
     nip98UrlPrefixes: [],
     // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
     // so it has nothing to authenticate. Empty rather than the deployment's
