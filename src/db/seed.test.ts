@@ -42,6 +42,8 @@ const BUZZ = {
   FOLDER_COMMAND: 1852,
   /** `KIND_FOLDER_STATE` — relay-signed, and refused from every client. */
   FOLDER_STATE: 30890,
+  /** Blossom authorization — a header credential, never stored. */
+  BLOSSOM_AUTH: 24242,
 } as const
 
 describe('seeded signing policies', () => {
@@ -263,5 +265,22 @@ describe('the Folder command', () => {
     for (const client of ['estiva-peek', 'estiva-ship'] as const) {
       expect(app(client).allowedKinds).not.toContain(BUZZ.FOLDER_STATE)
     }
+  })
+
+  it('lets both apps sign a Blossom authorization, for reading as well as writing', () => {
+    // CON-12. Not only about uploading: media GET is unconditionally
+    // authenticated on the deployed relay, so without this an app cannot
+    // *display* an attachment another app posted. Ship's need is that read
+    // half — SHI-1's screenshots — which is why it is not Peek-only.
+    for (const client of ['estiva-peek', 'estiva-ship'] as const) {
+      expect(app(client).allowedKinds).toContain(BUZZ.BLOSSOM_AUTH)
+    }
+  })
+
+  it('does not grant Blossom to the agent, which has no blobs', () => {
+    // The ceiling is a union of what an identity actually writes. The agent
+    // files and comments; it uploads nothing and renders nothing.
+    const agent = SEED_APPS.find((seeded) => seeded.clientId === 'claude-agent')
+    if (agent) expect(agent.allowedKinds).not.toContain(BUZZ.BLOSSOM_AUTH)
   })
 })
