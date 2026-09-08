@@ -405,11 +405,28 @@ describe('NIP-42 once the deployment allows the relay (PEE-4)', () => {
     })
   })
 
-  it('refuses Ship, which is granted neither the kind nor a relay', async () => {
+  it('signs a challenge response for Ship, now that it holds the kind', async () => {
+    // This was its own inverse until LIV-2 — "refuses Ship, which is granted
+    // neither the kind nor a relay" — because Ship opened no socket and so had
+    // no challenge to answer. It does now, and the pair below is what the
+    // reversal is actually asserting: the grant arrived with its scope.
     const response = await sign(shipToken, relayAuth('ws://relay.test/'))
+    expect(response.status).toBe(200)
+
+    const { event } = (await response.json()) as { event: Parameters<typeof verifyEvent>[0] }
+    expect(event.kind).toBe(22242)
+    expect(verifyEvent(event)).toBe(true)
+  })
+
+  it('refuses Ship a challenge from any other relay', async () => {
+    // The half worth having. Ship holding 22242 is only safe because the column
+    // bounds it, and the bound has to be read from *Ship's* row — an app that
+    // passes because Peek's row happens to be right is the failure this whole
+    // pairing exists to make impossible.
+    const response = await sign(shipToken, relayAuth('wss://evil.test/'))
     expect(response.status).toBe(422)
     await expect(response.json()).resolves.toMatchObject({
-      error: { detail: { reason: 'kind_not_allowed' } },
+      error: { detail: { reason: 'relay_auth_relay_not_allowed' } },
     })
   })
 

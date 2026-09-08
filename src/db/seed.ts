@@ -295,15 +295,39 @@ export const SEED_APPS: readonly SeedApp[] = [
     // authenticated, so without this Ship cannot display an attachment Peek
     // posted, which is SHI-1's screenshot half. Uploading from Ship (SHI-2)
     // uses the same grant.
+    //
+    // 22242 is NIP-42 relay auth, and it reverses what this entry used to say.
+    // See Peek's note above for why it is the one kind in either list that is
+    // unsafe unqualified: a challenge response proves to a relay that this
+    // person is present at it.
+    //
+    // **The premise changed, not the risk.** The old comment said Ship "reads
+    // the relay over the HTTP bridge and opens no socket, so it has nothing to
+    // authenticate", and that was accurate when it was written. LIV-1 then
+    // measured the socket Ship is about to open — one connection, one
+    // subscription, one filter carrying every Folder's `#h`, delivering 34 of
+    // 34 live against production. PER-3 is Ship adopting it, and the relay
+    // refuses a REQ before auth outright, so none of it can be proved end to
+    // end without this.
     allowedKinds: [
-      30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242,
+      30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
     ],
     nip98UrlPrefixes: [],
-    // No 22242: Ship reads the relay over the HTTP bridge and opens no socket,
-    // so it has nothing to authenticate. Empty rather than the deployment's
-    // list, so that adding the kind here later cannot be a one-line unscoped
-    // grant — it has to name a relay too.
-    relayAuthUrls: () => [],
+    // The other half of 22242, and the old comment's own condition: it said the
+    // reversal "cannot be a one-line unscoped grant — it has to name a relay
+    // too". It does. `seed.test.ts` asserts the pairing in both directions
+    // across every seeded app, so the kind cannot land above without this list
+    // being non-empty.
+    //
+    // **That assertion being green proves less than it looks.** It reads
+    // `config().SIGN_RELAY_AUTH_ALLOWED_URLS`, and under vitest that is the
+    // fixture `ws://relay.test` (`src/test/setup.ts`). A deployment whose own
+    // list is empty passes every test in this repo and then refuses this app
+    // for every relay there is — `/sign` clears the kind check and the
+    // `relay`-tag branch in `domain/policy.ts` ANDs the column down to nothing.
+    // That is PEEK-133's shape, and it is why the deployment half is verified
+    // on the box against `app_credentials` rather than here.
+    relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },
 ]
