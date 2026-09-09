@@ -251,12 +251,41 @@ describe('seeded signing policies', () => {
     }
   })
 
-  it('does not grant the edit to the agent, which has no comments to edit', () => {
-    // The ceiling is a union of what an identity writes, not a convenience.
-    // `claude-agent` files and comments through Ship's own kinds; nothing in it
-    // edits a published message, so granting this would widen it for nobody.
+  it('grants the edit to the agent too, which now has comments to edit', () => {
+    /*
+      This asserted the opposite until AGE-3, on the ground that `claude-agent`
+      "files and comments through Ship's own kinds; nothing in it edits a
+      published message". The second half stopped being true: estiva-agent#39
+      adds `ship edit-comment` and `peek edit`, and both publish a 40003.
+
+      The ceiling is a union of what an identity writes, and the agent writes
+      the comments it would be editing — the same argument that put 9 and 1111
+      on the row, not a widening for its own sake. Nothing about *who* may edit
+      changes: `validate_edit_ownership` still accepts only the target's
+      effective author or the NIP-OA owner of an authoring agent, so this grant
+      lets the agent edit what it wrote and nothing else.
+
+      Blossom below stays refused, and is the negative control that keeps this
+      file from reading as "the agent gets whatever it asks for".
+    */
     const agent = SEED_APPS.find((seeded) => seeded.clientId === 'claude-agent')
-    if (agent) expect(agent.allowedKinds).not.toContain(BUZZ.MESSAGE_EDIT)
+    if (agent) expect(agent.allowedKinds).toContain(BUZZ.MESSAGE_EDIT)
+  })
+
+  it('says out loud that the agent is not seeded here, so this file cannot enforce it', () => {
+    /*
+      **`claude-agent` is not in `SEED_APPS`.** Its row on production was made
+      by hand, so both assertions above are `if (agent)` — no-ops — and the
+      grant AGE-3 needs is a `psql` update on the box rather than a re-seed.
+
+      Worth an assertion rather than a comment, because the guard is invisible
+      at a glance: somebody reading a green suite would reasonably conclude the
+      ceiling above is the one production holds, and it is not. If the agent is
+      ever added to `SEED_APPS`, this fails and the two tests above start
+      meaning something — which is the moment to check the hand-made row's
+      other columns before a seed overwrites them.
+    */
+    expect(SEED_APPS.find((seeded) => seeded.clientId === 'claude-agent')).toBeUndefined()
   })
 })
 
