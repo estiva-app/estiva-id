@@ -44,6 +44,11 @@ const BUZZ = {
   FOLDER_STATE: 30890,
   /** Blossom authorization — a header credential, never stored. */
   BLOSSOM_AUTH: 24242,
+  /**
+   * `KIND_FILE` — the bare file. Owned by no app (RFC 0.5 §10.7): the generic
+   * apps render its aspects, and typed kinds add properties on top of it.
+   */
+  BARE_FILE: 30840,
 } as const
 
 describe('seeded signing policies', () => {
@@ -215,6 +220,21 @@ describe('seeded signing policies', () => {
     // above were each found by shipping a feature that worked everywhere except
     // `/sign`.
     expect(app('estiva-peek').allowedKinds).toContain(PEEK.DELETE_GROUP)
+  })
+
+  it('lets Peek sign a bare file, because a topic is one', () => {
+    // RFC 0.5 §10.7, decided 2026-09-11. A new topic is a `kind:30840` inside
+    // a team's channel, and its messages are `kind:1111` comments on it —
+    // which Peek could already sign. The relay has carried `KIND_FILE` as a
+    // member write since NIP-FC; this ceiling was the only gate left, and it
+    // refuses as `422 kind_not_allowed` after the app has reported success.
+    //
+    // Peek only. Ship creates no bare files this week, and the checklist's
+    // lesson is that a grant nobody exercises is a grant nobody notices is
+    // wrong — the assertion is pinned in both directions so widening it is a
+    // decision rather than a drift.
+    expect(app('estiva-peek').allowedKinds).toContain(BUZZ.BARE_FILE)
+    expect(app('estiva-ship').allowedKinds).not.toContain(BUZZ.BARE_FILE)
   })
 
   it('no longer seeds the retired linear-lite credential', () => {
