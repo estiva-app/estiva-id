@@ -215,9 +215,19 @@ export const SEED_APPS: readonly SeedApp[] = [
     // `t get`), one blob (`x <sha256>`), and carries an `expiration`. It
     // authorises one action on one already-hashed blob, and the relay checks
     // membership on top of it.
+    //
+    // **30840 — a topic is a bare file (RFC 0.5 §10.7, decided 2026-09-11).**
+    // A new Peek topic is no longer a channel but a file *inside* a team's
+    // channel: `kind:30840` carrying `h`, with its conversation as `kind:1111`
+    // comments on it — the shape Ship's issues already have, and `1111` is
+    // already above. The kind is owned by no app on purpose (the generic apps
+    // handle it), so Peek is the first producer rather than the owner. Already
+    // registered on the relay (`KIND_FILE`, `MessagesWrite`); this was the only
+    // gate left. Not granted to Ship: it creates no bare files yet, and a grant
+    // nobody exercises is a grant nobody notices is wrong.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852, 24242,
+      40003, 1852, 24242, 30840,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
