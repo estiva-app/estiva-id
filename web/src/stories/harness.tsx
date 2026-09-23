@@ -1,27 +1,22 @@
 import type { Decorator } from '@storybook/react-vite'
 import { useEffect } from 'react'
 /**
- * `?inline` rather than a plain import: a plain one is global and would leak the
- * account UI's stylesheet into every other app's stories in the shared
- * Storybook. This hands back the text so it can be injected and removed with
- * the story.
+ * `?inline` rather than a plain import: the text is injected with the story and
+ * removed with it, so the stylesheet is exactly what the real app loads
+ * (`main.tsx` imports this file and nothing else) and nothing lingers between
+ * stories.
  */
 import styles from '../styles.css?inline'
 
 /**
  * The harness Estiva ID's stories run inside.
  *
- * These stories live in this repo but render in **Peek's** Storybook, which is
- * the one shared library for all the Estiva apps. That instance knows nothing
- * about this app, so everything these screens need to render — their
- * stylesheet, an answer for every request they make, the query string they read
- * — is carried here rather than assumed from the preview.
- *
- * Known limitation of sharing one instance: Peek's global stylesheet, Tailwind
- * preflight included, is loaded for every story and cannot be opted out of.
- * These screens therefore render very close to the real thing, but not
- * identically. Check a real change against `pnpm dev:web` before trusting a
- * pixel.
+ * They run in this repo's own Storybook (`pnpm storybook`, :6009 — UIG-36).
+ * Until 2026-09-23 they rendered inside Peek's, whose global stylesheet,
+ * Tailwind preflight included, was loaded under every story; that is why some
+ * screens looked slightly different there. Everything these screens need —
+ * their stylesheet, an answer for every request they make, the query string
+ * they read — is carried here rather than assumed from the preview.
  */
 
 /** What a story wants `fetch` to answer, keyed by the path `api.ts` requests. */

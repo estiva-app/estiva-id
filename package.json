@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:web": "vite",
+    "storybook": "storybook dev -p 6009 --no-open",
     "build": "tsc -p tsconfig.build.json",
     "build:web": "vite build",
     "start": "node dist/server.js",
