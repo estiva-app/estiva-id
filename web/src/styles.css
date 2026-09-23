@@ -317,8 +317,15 @@ label {
   margin-bottom: 8px;
 }
 
+/*
+ * A field with no `type` is a text field too, and the invite form's email is
+ * `type="email"`. Neither matched until 2026-09-23 (UIG-36), so both drew as
+ * the browser's own box; Peek's Storybook reset hid it.
+ */
 input[type="text"],
-input[type="url"] {
+input[type="url"],
+input[type="email"],
+input:not([type]) {
   /* Matches Peek's `TextInput` primitive, which replaces this later. */
   width: 100%;
   padding: 8px 12px;
@@ -341,12 +348,16 @@ input[type="url"] {
 }
 
 input[type="text"]::placeholder,
-input[type="url"]::placeholder {
+input[type="url"]::placeholder,
+input[type="email"]::placeholder,
+input:not([type])::placeholder {
   color: var(--text-muted);
 }
 
 input[type="text"]:focus,
-input[type="url"]:focus {
+input[type="url"]:focus,
+input[type="email"]:focus,
+input:not([type]):focus {
   /* Resting is already `--border-strong`, so focus has to go further. */
   border-color: var(--border-focus);
   box-shadow: var(--focus-ring);
@@ -366,7 +377,8 @@ select:focus-visible,
   line-height: 120%;
   font-weight: 400;
   color: var(--text-secondary);
-  margin-top: 6px;
+  /* All four sides: a hint is often a `<p>`, which keeps 12px below otherwise. */
+  margin: 6px 0 0;
 }
 
 .hint.error {
@@ -531,7 +543,9 @@ dl.facts dd.mono {
   line-height: 120%;
 }
 
-ul.credentials {
+/* `plain` is the bots list's (BotsCard); it had no rule until UIG-36. */
+ul.credentials,
+ul.plain {
   list-style: none;
   margin: 0;
   padding: 0;
