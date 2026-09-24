@@ -63,6 +63,8 @@ export interface ProfileFields {
   picture?: string
   about?: string
   nip05?: string
+  /** NIP-24: the account is automated. Only ever `true` or absent. */
+  bot?: true
 }
 
 /**

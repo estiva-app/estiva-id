@@ -98,6 +98,17 @@ describe('buildProfile', () => {
     )
   })
 
+  // NIP-24's `bot` is a JSON boolean, sorted with the rest: first, before
+  // `display_name`. A string "true" would be a different field to every reader.
+  it('writes bot as a boolean, in key order (REM-3)', () => {
+    const event = buildProfile(BUZZ_PUBKEY, 1_753_300_200, {
+      name: 'Claude',
+      display_name: 'Claude',
+      bot: true,
+    })
+    expect(event.content).toBe('{"bot":true,"display_name":"Claude","name":"Claude"}')
+  })
+
   it('is a kind:0 with no tags', () => {
     const event = buildProfile(BUZZ_PUBKEY, 1_753_300_200, { display_name: 'Jan' })
     expect(event.kind).toBe(0)

@@ -26,6 +26,8 @@
     "invite": "tsx src/admin/create-invite.ts",
     "avatars:republish": "tsx src/admin/republish-avatars.ts",
     "avatars:republish:prod": "node dist/admin/republish-avatars.js",
+    "roles:republish": "tsx src/admin/republish-role-profiles.ts",
+    "roles:republish:prod": "node dist/admin/republish-role-profiles.js",
     "invite:prod": "node dist/admin/create-invite.js",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"
