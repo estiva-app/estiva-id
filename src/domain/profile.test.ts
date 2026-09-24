@@ -151,6 +151,25 @@ describe('publishProfile', () => {
   })
 
   /**
+   * REM-3. An app tells a colleague from an agent by NIP-24's `bot`, and this
+   * service is the one place that knows which accounts are roles. A person's
+   * profile carries no `bot` at all — not `false` — so its event is unchanged.
+   */
+  it('marks a role account bot, and a person not at all', async () => {
+    const role = await createUserWithKey({ displayName: 'Claude (steered by Ada)', kind: 'role' })
+    const calls = stubRelay({ body: { accepted: true, event_id: 'abc' } })
+
+    await publishProfile(role.id)
+    await publishProfile(ada.id)
+
+    const [roleContent, personContent] = calls.map((c) =>
+      JSON.parse((c.body as { content: string }).content),
+    )
+    expect(roleContent).toMatchObject({ bot: true, display_name: 'Claude (steered by Ada)' })
+    expect(personContent).not.toHaveProperty('bot')
+  })
+
+  /**
    * SHA-22. The relay's own media URL answers `401` to an `<img>`, and every
    * consumer of this field is one — so what gets published is the URL this
    * service serves the bytes from. `users.picture` is left as the record.

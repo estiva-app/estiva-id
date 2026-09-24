@@ -33,6 +33,12 @@ export interface Profile {
   handle: string | null
   /** The host the handle is valid at, and what `nip05` is assembled from. */
   communityHost: string | null
+  /**
+   * A `role` account — a service identity, not a person (PEEK-34). Published
+   * as NIP-24's `"bot": true`, so an app can tell a colleague from an agent
+   * without asking this service (REM-3).
+   */
+  isBot: boolean
 }
 
 export interface ProfileUpdate {
@@ -62,8 +68,9 @@ export async function getProfile(userId: string): Promise<Profile | undefined> {
     picture: string | null
     handle: string | null
     community_host: string | null
+    kind: string
   }>(
-    `select u.display_name, u.picture, h.handle, h.community_host
+    `select u.display_name, u.picture, h.handle, h.community_host, u.kind
        from users u
        left join user_handles h
          on h.user_id = u.id and h.community_host = $2
@@ -76,6 +83,7 @@ export async function getProfile(userId: string): Promise<Profile | undefined> {
     picture: row.picture,
     handle: row.handle,
     communityHost: row.community_host,
+    isBot: row.kind === 'role',
   }
 }
 
@@ -196,6 +204,14 @@ export async function publishProfile(
     */
     picture: avatarDisplayUrl(profile.picture) ?? undefined,
     nip05: nip05Value(profile),
+    /*
+      NIP-24's marker for automated content, on every `role` account and on no
+      person (REM-3). Peek's People list is humans only and reads it from here,
+      the one place that knows. Absent rather than `false` for a person: an
+      absent field is the NIP's default, and it keeps a person's event id what
+      it was before this field existed.
+    */
+    bot: profile.isBot || undefined,
   }
 
   try {
