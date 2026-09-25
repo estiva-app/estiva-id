@@ -50,6 +50,7 @@ import { z } from 'zod'
 import { config } from '../../config.js'
 import { findAppPolicy } from '../../domain/apps.js'
 import { recordAudit } from '../../domain/audit.js'
+import { checkDelegation, withDelegateTag } from '../../domain/delegation.js'
 import { verifyToken } from '../../domain/jwt.js'
 import { findSignerByPubkey, withUserSecretKey } from '../../domain/keys.js'
 import { evaluateSignPolicy } from '../../domain/policy.js'
@@ -90,7 +91,9 @@ export function signRoutes(): Hono<AppEnv> {
     // caller sends no Origin and needs none.
     await allowOrigin(c)
 
-    const { pubkey, clientId } = await verifyToken(bearerToken(c.req.header('authorization')))
+    const { pubkey, clientId, delegate } = await verifyToken(
+      bearerToken(c.req.header('authorization')),
+    )
 
     const parsed = signRequestSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) {
@@ -149,11 +152,41 @@ export function signRoutes(): Hono<AppEnv> {
     }
     const userId = signer.userId
 
+    /*
+      A bot signing as this person (PER-22). Re-checked on every call rather
+      than trusted from the token, which is what makes revoking a delegation
+      stop the next signature instead of the one after the token expires.
+    */
+    let delegateTag: string | undefined
+    if (delegate) {
+      const check = await checkDelegation(delegate)
+      if (!check.ok || check.userId !== userId) {
+        await recordAudit({
+          actorType: 'app',
+          actorUserId: userId,
+          actorClientId: clientId,
+          action: 'sign.refused',
+          outcome: 'refused',
+          subjectPubkey: pubkey,
+          detail: {
+            reason: check.ok ? 'delegation_unknown' : check.reason,
+            delegate: delegate.clientId,
+            kind: parsed.data.event.kind,
+          },
+          requestId,
+        })
+        throw unauthenticated('That delegation has ended')
+      }
+      delegateTag = check.tag
+    }
+
     const unsigned = {
       pubkey,
       kind: parsed.data.event.kind,
       created_at: parsed.data.event.created_at ?? Math.floor(Date.now() / 1000),
-      tags: parsed.data.event.tags,
+      tags: delegateTag
+        ? withDelegateTag(parsed.data.event.tags, delegateTag)
+        : parsed.data.event.tags,
       content: parsed.data.event.content,
     }
 
@@ -188,7 +221,13 @@ export function signRoutes(): Hono<AppEnv> {
       action: 'sign.granted',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { kind: signed.kind, eventId: signed.id },
+      detail: {
+        kind: signed.kind,
+        eventId: signed.id,
+        // The bot, when one signed as this person — so "what did the agent
+        // publish as me" is one query on `detail->>'delegate'`.
+        ...(delegate ? { delegate: delegate.clientId, tag: delegateTag } : {}),
+      },
       requestId,
     })
 

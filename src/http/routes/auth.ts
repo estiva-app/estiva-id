@@ -82,7 +82,7 @@ import {
 import { createUserWithKey, findUserByEmail, findUserById } from '../../domain/users.js'
 import { badRequest, conflict, forbidden, notFound, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
-import { requireSession } from '../middleware/session.js'
+import { requireAnySession, requireSession } from '../middleware/session.js'
 
 /**
  * Why an invite was refused, in words the person holding the link can act on.
@@ -195,7 +195,7 @@ async function verifyRegistration(
   }
 }
 
-async function verifyAuthentication(
+export async function verifyAuthentication(
   options: VerifyAuthenticationResponseOpts,
 ): Promise<(VerifiedAuthenticationResponse & { refusal?: string }) | Refused> {
   try {
@@ -212,7 +212,7 @@ async function verifyAuthentication(
  * looked up in the database — a challenge this service never issued has no row,
  * so `consumeChallenge` refuses it.
  */
-function challengeFromClientData(clientDataJSON: string): string {
+export function challengeFromClientData(clientDataJSON: string): string {
   let parsed: unknown
   try {
     parsed = JSON.parse(new TextDecoder().decode(isoBase64URL.toBuffer(clientDataJSON)))
@@ -753,7 +753,9 @@ export function authRoutes(): Hono<AppEnv> {
     return c.json({ verified: true, pubkey })
   })
 
-  routes.post('/auth/logout', requireSession, async (c) => {
+  // Any session, delegated included: a bot ending its own grant is the one
+  // thing it should always be able to do.
+  routes.post('/auth/logout', requireAnySession, async (c) => {
     const session = c.get('session')
     const token = getCookie(c, SESSION_COOKIE)
     if (token) await revokeSession(token)
@@ -797,8 +799,9 @@ export function authRoutes(): Hono<AppEnv> {
 
   // --- Self-serve credential management -----------------------------------
 
-  routes.get('/me', requireSession, async (c) => {
-    const { userId } = c.get('session')
+  // Any session: a bot holding a delegated one needs to confirm who it is.
+  routes.get('/me', requireAnySession, async (c) => {
+    const { userId, delegate } = c.get('session')
     const [user, pubkey] = await Promise.all([findUserById(userId), getActivePubkey(userId)])
     if (!user) throw notFound('User not found')
     return c.json({
@@ -811,6 +814,8 @@ export function authRoutes(): Hono<AppEnv> {
       // answers 403 — the check that matters still happens on the server.
       role: user.role,
       pubkey,
+      // Which bot holds this session, when one does (PER-22).
+      ...(delegate ? { delegate: { clientId: delegate.clientId, tag: delegate.tag } } : {}),
     })
   })
 

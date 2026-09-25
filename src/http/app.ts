@@ -7,12 +7,14 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { query } from '../db/pool.js'
+import type { Session } from '../domain/sessions.js'
 import { AppError, toErrorBody } from '../errors.js'
 import { type Logger, logger } from '../logger.js'
 import { adminRoutes } from './routes/admin.js'
 import { authRoutes } from './routes/auth.js'
 import { authorizeRoutes } from './routes/authorize.js'
 import { avatarRoutes } from './routes/avatar.js'
+import { deviceRoutes } from './routes/device.js'
 import { directoryRoutes } from './routes/directory.js'
 import { inviteRoutes } from './routes/invites.js'
 import { logoutRoutes } from './routes/logout.js'
@@ -27,7 +29,7 @@ export interface AppEnv {
     requestId: string
     log: Logger
     /** Set by `requireSession`. Absent on unauthenticated routes. */
-    session: { id: string; userId: string }
+    session: Session
   }
 }
 
@@ -75,6 +77,7 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', logoutRoutes())
   app.route('/', inviteRoutes())
   app.route('/', tokenRoutes())
+  app.route('/', deviceRoutes())
   app.route('/', signRoutes())
   app.route('/', nip44Routes())
   app.route('/', profileRoutes())

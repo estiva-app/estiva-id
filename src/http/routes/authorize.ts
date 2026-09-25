@@ -206,7 +206,13 @@ export function authorizeRoutes(): Hono<AppEnv> {
       actorClientId: client_id,
       action: 'authorize.issue',
       outcome: 'success',
-      detail: { redirectUri: redirect_uri, silent: prompt === 'none' },
+      detail: {
+        redirectUri: redirect_uri,
+        silent: prompt === 'none',
+        // A bot signing in to an app as this person (PER-22). The token minted
+        // from this code will name it too; see `exchangeAuthorizationCode`.
+        ...(session.delegate ? { delegate: session.delegate.clientId } : {}),
+      },
       requestId: c.get('requestId'),
     })
 

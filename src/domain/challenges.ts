@@ -18,8 +18,11 @@ const TTL_SECONDS = 300
  * recovery challenge be redeemed at `/auth/register/verify`, which does neither
  * — leaving a live link and a lost device that still works. Separating them
  * makes that combination unrepresentable rather than merely unlikely.
+ *
+ * `delegation` is the same argument for approving a bot's request (PER-22): an
+ * approval assertion must not open a session, and a sign-in must not approve.
  */
-export type Ceremony = 'registration' | 'authentication' | 'recovery'
+export type Ceremony = 'registration' | 'authentication' | 'recovery' | 'delegation'
 
 export async function storeChallenge(input: {
   challenge: string
