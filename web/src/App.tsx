@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AdminPeople, AdminPerson } from './AdminPeople'
 import { AuditLog } from './AuditLog'
 import { BotsCard } from './BotsCard'
+import { DelegationsCard } from './DelegationsCard'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
 import { SecurityCard } from './SecurityCard'
@@ -321,6 +322,9 @@ export function App() {
           onChange={(next) => setState({ ...state, bots: next })}
         />
       )}
+
+      {/* Beside the bots, since it is what they are doing as you (PER-22). */}
+      <DelegationsCard />
 
       {/*
         Below the passkeys, because it is mostly about them — and because an

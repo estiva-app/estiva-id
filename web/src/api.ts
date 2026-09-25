@@ -480,6 +480,56 @@ export const loginVerify = (assertion: unknown) =>
     body: JSON.stringify(assertion),
   })
 
+// --- A bot acting as you (PER-22) ---------------------------------------------
+
+/** What is asking, for the approval screen. */
+export interface DeviceRequest {
+  userCode: string
+  botName: string
+  clientId: string
+  label: string | null
+  ownerDisplayName: string | null
+  expiresAt: string
+  sessionHours: number
+}
+
+const devicePath = (code: string) => `/device/requests/${encodeURIComponent(code)}`
+
+export const getDeviceRequest = (code: string) => request<DeviceRequest>(devicePath(code))
+
+export const deviceApprovalOptions = (code: string) =>
+  request<PublicKeyCredentialRequestOptionsJSON>(`${devicePath(code)}/options`, {
+    method: 'POST',
+  })
+
+export const approveDeviceRequest = (code: string, assertion: unknown) =>
+  request<{ approved: boolean; botName: string }>(`${devicePath(code)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(assertion),
+  })
+
+export const denyDeviceRequest = (code: string) =>
+  request<{ denied: boolean }>(`${devicePath(code)}/deny`, { method: 'POST' })
+
+/** A live session one of your bots holds as you. */
+export interface Delegation {
+  id: string
+  clientId: string
+  botName: string
+  tag: string
+  createdAt: string
+  expiresAt: string
+  lastSeenAt: string | null
+}
+
+export const listDelegations = () =>
+  request<{ delegations: Delegation[] }>('/me/delegations').then((body) => body.delegations)
+
+export const revokeDelegation = (id: string) =>
+  request<{ revoked: boolean }>(`/me/delegations/${encodeURIComponent(id)}/revoke`, {
+    method: 'POST',
+  })
+
 export interface InvitePreview {
   email: string
   displayName: string | null
