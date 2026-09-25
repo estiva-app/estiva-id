@@ -384,7 +384,8 @@ query-parameter or cookie form of the credential. So *no* app could display an
 avatar, however the workspace was configured: every uploaded picture fell back
 to initials in Peek and Ship, and this service's own profile page showed a
 broken image for a photo it had just stored. Message attachments were unaffected
-because Peek keeps those in Convex, which never touches this store.
+because Peek kept those in Convex then. They have been in this store since
+REM-2 and REM-1 (2026-09-23), and Peek has had no Convex since REM-8.
 
 Handing the browser a credential is what this service exists to avoid, so the
 read is signed here instead — `t=get`, scoped to the one hash *and* this host,
@@ -729,14 +730,18 @@ Every refusal is `invalid_grant`, with the reason in `audit_events` — same
 posture as the code grant, and for the same reason.
 
 Claims: `iss` = issuer origin, `sub` = **the user's pubkey**, `aud` = the app's
-`client_id`. RS256 — **not** ES256, because Convex rejects ES256 tokens with
-`Could not verify OIDC token claim` even when they verify against our own JWKS
-with a compliant library. See `src/domain/jwt.ts` for the full reasoning.
+`client_id`. RS256, not ES256. The reason was Peek's Convex backend, which
+rejected ES256 tokens with `Could not verify OIDC token claim` even when they
+verified against our own JWKS with a compliant library (`src/domain/jwt.ts`).
+**Peek has no Convex since REM-8 (2026-09-25)**, and nothing outside this
+service verifies these tokens any more: Peek and Ship present them only back
+here, to `/token` and `/sign`. So RS256 is historical rather than required.
+Changing `ALG` is a one-line change: `ensureActiveSigningKey` retires a key of
+the old algorithm as `previous` and mints a new one.
 
-A relying party configures itself with the issuer URL and its `applicationID`,
-and resolves JWKS through discovery — the same flow as a Clerk or Auth0
-integration. For Convex that is `domain` + `applicationID` in
-`convex/auth.config.ts`, and `getUserIdentity().subject` is then the pubkey.
+A third-party relying party would configure itself with the issuer URL and
+resolve JWKS through discovery, the same flow as a Clerk or Auth0 integration.
+`sub` is then the pubkey.
 
 ## Signing
 

@@ -79,9 +79,10 @@ app ever holds a secret key.
 This is NIP-46's property — remote signing, secrets never leaving the signer —
 over HTTPS instead of relay transport. Real NIP-46 is the wrong fit here:
 
-* It needs a **socket** for `kind:24133` traffic. Convex functions are
-  request-scoped and cannot hold one; `convex/nostr/sync.ts` already polls for
-  exactly that reason.
+* It needs a **socket** for `kind:24133` traffic. When this was decided, Peek's
+  backend was Convex, whose functions are request-scoped and cannot hold one.
+  Peek has had no backend of its own since REM-8 (2026-09-25), and a browser
+  tab is no better a home for a signer's socket.
 * Signing latency measured in seconds would be unusable on every click.
 
 **This is the seam Stage 4 re-points at a local signer**, so the
@@ -112,11 +113,10 @@ Every grant and every refusal is written to `audit_events`.
 
 ## 5. Tokens
 
-ES256 JWTs, with:
+RS256 JWTs (not ES256; `docs/API.md` has the reason), with:
 
-* `sub` = the user's **pubkey**. This is the point: Convex surfaces
-  `getUserIdentity().subject`, so an app knows who signed an event without
-  asking this service anything.
+* `sub` = the user's **pubkey**. This is the point: anything holding the token
+  knows who will sign without asking this service anything.
 * `aud` = the app's `client_id`, which selects the signing policy.
 * `iss` = this service's origin, from which `/.well-known/jwks.json` is
   discoverable in the standard way — the same path a Clerk or Auth0 integration
@@ -156,13 +156,17 @@ later.
 Three decisions taken on the basis that this is an internal deployment first.
 All three need revisiting for real production use.
 
-* **Offboarding does not propagate to Estiva Peek immediately.** Convex
-  validates JWTs statelessly against JWKS, so a leaver holding a live token
-  keeps their Peek session until it expires. The relay side is instant; the app
-  side is not. Mitigation stays cheap — TTL plus refresh is a config value
-  (`JWT_TTL_SECONDS`, currently 3600s), not a rewrite. Raised from 600s because
-  no refresh grant exists yet (PEEK-108); until one does, this window is the
-  cost of usable browser sessions.
+* **Offboarding reaches Peek at its next signature, not instantly.** Until
+  REM-8 (2026-09-25), Peek's Convex backend validated JWTs statelessly against
+  JWKS, so a leaver kept their Peek session until the token expired. Peek has
+  no Convex now. Every relay request it makes carries a NIP-98 event signed
+  through `/sign`, and `/sign` refuses a user whose status is not `active`
+  (`src/http/routes/sign.ts`). So a leaver's next read or write fails.
+  `verifyToken` is still stateless, and two things outlast the offboarding:
+  what the tab already holds, and a relay socket that is already
+  authenticated, which needs `/sign` again only when it reconnects.
+  `JWT_TTL_SECONDS` (3600s) bounds the token itself; it was raised from 600s
+  because no refresh grant exists yet (PEEK-108).
 * **Estiva ID is a single point of failure.** After Stage 2 no app can sign
   locally, so if this is down, nobody can publish anywhere. Worth getting right
   now: failure must be **loud**. Linear-lite already surfaces publish failures

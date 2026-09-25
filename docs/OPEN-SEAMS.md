@@ -96,7 +96,8 @@ joined (PEEK-59).
 * ~~Confirm the revocation semantics above, with a test against a real relay.~~ — done, above.
 * `communities.host` seeded per workspace (PEEK-59) — seeded for
   `estiva.estiva.app`; the relay answers NIP-11 there, so the tenant resolves.
-* ~~Remove Peek's publisher (`peek-app/convex/nostr/publish.ts`)~~ — done.
+* ~~Remove Peek's publisher (`peek-app/convex/nostr/publish.ts`)~~ — done, and
+  Peek has no Convex at all since REM-8 (2026-09-25).
 * Remove Ship's publisher (`estiva-ship/src/store.ts`) — **blocked, and not on
   effort.** Ship mints its key per-browser in localStorage
   (`localIdentity('ship.secretkey')`, `apps/ship/app.ts`) and has no Estiva ID
