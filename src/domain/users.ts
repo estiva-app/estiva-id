@@ -260,11 +260,13 @@ export async function createUserWithKey(input: {
    * `createRoleIdentity`, since it is a statement about another row.
    */
   ownerUserId?: string | null
+  /** A QA persona that signs in with a secret instead of a passkey (PER-22). */
+  testAccount?: boolean
 }): Promise<UserWithPubkey> {
   return withTransaction(async (client) => {
     const inserted = await client.query<User>(
-      `insert into users (email, display_name, role, kind, owner_user_id)
-       values ($1, $2, $3, $4, $5)
+      `insert into users (email, display_name, role, kind, owner_user_id, test_account)
+       values ($1, $2, $3, $4, $5, $6)
        returning ${USER_COLUMNS}`,
       [
         input.email ?? null,
@@ -272,6 +274,7 @@ export async function createUserWithKey(input: {
         input.role ?? 'member',
         input.kind ?? 'human',
         input.ownerUserId ?? null,
+        input.testAccount ?? false,
       ],
     )
     const user = inserted.rows[0]

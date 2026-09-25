@@ -24,6 +24,8 @@
     "seed": "tsx src/db/seed.ts",
     "seed:prod": "node dist/db/seed.js",
     "invite": "tsx src/admin/create-invite.ts",
+    "test-account": "tsx src/admin/create-test-account.ts",
+    "test-account:prod": "node dist/admin/create-test-account.js",
     "avatars:republish": "tsx src/admin/republish-avatars.ts",
     "avatars:republish:prod": "node dist/admin/republish-avatars.js",
     "roles:republish": "tsx src/admin/republish-role-profiles.ts",
