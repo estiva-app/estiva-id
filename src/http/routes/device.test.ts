@@ -89,7 +89,7 @@ async function delegatedCookie(bot: { clientId: string; secret: string }, owner:
   const started = await startRequest(bot.clientId, bot.secret)
   expect((await approve(started.body.user_code, owner.device)).status).toBe(200)
   // Past the polling interval, so the collect is not answered `slow_down`.
-  await query(`update device_authorizations set last_polled_at = null`)
+  await query('update device_authorizations set last_polled_at = null')
   const collected = await poll(started.body.device_code, bot.clientId, bot.secret)
   expect(collected.status).toBe(200)
   const body = (await collected.json()) as {
