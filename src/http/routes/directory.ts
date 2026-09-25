@@ -30,6 +30,7 @@
  */
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { checkDelegation } from '../../domain/delegation.js'
 import { lookupContacts } from '../../domain/directory.js'
 import { verifyToken } from '../../domain/jwt.js'
 import { findSignerByPubkey } from '../../domain/keys.js'
@@ -65,10 +66,15 @@ function bearerToken(header: string | undefined): string {
  * person's standing that matters.
  */
 async function requireActiveCaller(authorization: string | undefined): Promise<string> {
-  const { pubkey } = await verifyToken(bearerToken(authorization))
+  const { pubkey, delegate } = await verifyToken(bearerToken(authorization))
   const caller = await findSignerByPubkey(pubkey)
   if (!caller || caller.userStatus !== 'active') {
     throw forbidden('That identity is no longer active')
+  }
+  // A revoked delegation stops here too, not only at `/sign` (PER-22).
+  if (delegate) {
+    const check = await checkDelegation(delegate)
+    if (!check.ok || check.userId !== caller.userId) throw forbidden('That delegation has ended')
   }
   return pubkey
 }

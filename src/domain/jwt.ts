@@ -134,23 +134,48 @@ export interface IssuedToken {
   pubkey: string
 }
 
+/**
+ * A bot acting as the token's subject, through a session the subject granted
+ * it (PER-22).
+ */
+export interface TokenDelegate {
+  /** The bot's service credential — `act.sub`. */
+  clientId: string
+  /** The delegated session — `sid`. What `/sign` re-checks on every call. */
+  sessionId: string
+}
+
 export async function issueToken(input: {
   pubkey: string
   clientId: string
+  delegate?: TokenDelegate | undefined
 }): Promise<IssuedToken> {
   const cfg = config()
   const { kid, key } = await loadActiveSigningKey()
 
-  const token = await new SignJWT({})
+  /*
+    RFC 8693's actor claim: `sub` is still the person — the key that signs, and
+    what Convex reads as the user — and `act` says who is actually driving.
+    A relying party that ignores `act` sees the person, which is correct for
+    what it decides; this service reads it back on every `/sign`.
+  */
+  const claims = input.delegate
+    ? { act: { sub: input.delegate.clientId }, sid: input.delegate.sessionId }
+    : {}
+  const ttl = input.delegate
+    ? Math.min(cfg.DELEGATED_JWT_TTL_SECONDS, cfg.JWT_TTL_SECONDS)
+    : cfg.JWT_TTL_SECONDS
+
+  const token = await new SignJWT(claims)
     .setProtectedHeader({ alg: ALG, kid, typ: 'JWT' })
     .setIssuer(cfg.ISSUER_URL)
     .setSubject(input.pubkey)
     .setAudience(input.clientId)
     .setIssuedAt()
-    .setExpirationTime(`${cfg.JWT_TTL_SECONDS}s`)
+    .setExpirationTime(`${ttl}s`)
     .sign(key)
 
-  return { token, expiresIn: cfg.JWT_TTL_SECONDS, pubkey: input.pubkey }
+  return { token, expiresIn: ttl, pubkey: input.pubkey }
 }
 
 /** Public JWKS — the active key plus any `previous` one, so rotation is not a cliff. */
@@ -167,6 +192,20 @@ export interface VerifiedToken {
   pubkey: string
   /** The app the token was issued to — `aud`. Selects the signing policy. */
   clientId: string
+  /** Present when a bot holds the token as the subject — `act` and `sid`. */
+  delegate?: TokenDelegate | undefined
+}
+
+function readDelegate(payload: Record<string, unknown>): TokenDelegate | undefined {
+  const act = payload.act
+  if (act === undefined) return undefined
+  const actor = typeof act === 'object' && act !== null ? (act as { sub?: unknown }).sub : undefined
+  // Half a delegation is refused, not read as none: a token naming a bot with
+  // no session to check would otherwise sign as the person unconditionally.
+  if (typeof actor !== 'string' || typeof payload.sid !== 'string') {
+    throw new Error('token carries an incomplete act claim')
+  }
+  return { clientId: actor, sessionId: payload.sid }
 }
 
 /**
@@ -188,7 +227,7 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
     const audience = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud
     if (!payload.sub || !audience) throw new Error('token is missing sub or aud')
 
-    return { pubkey: payload.sub, clientId: audience }
+    return { pubkey: payload.sub, clientId: audience, delegate: readDelegate(payload) }
   } catch (error) {
     throw unauthenticated(`Invalid token: ${(error as Error).message}`)
   }
@@ -229,6 +268,6 @@ export function discoveryDocument(): Record<string, unknown> {
     code_challenge_methods_supported: ['S256'],
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: [ALG],
-    claims_supported: ['sub', 'aud', 'iss', 'exp', 'iat'],
+    claims_supported: ['sub', 'aud', 'iss', 'exp', 'iat', 'act', 'sid'],
   }
 }

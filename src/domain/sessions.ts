@@ -14,9 +14,22 @@ import { query, queryOne } from '../db/pool.js'
 
 export const SESSION_COOKIE = 'estiva_id_session'
 
+/**
+ * Who holds a session that is not the person's own (PER-22).
+ *
+ * `clientId` is the bot's service credential; `tag` is the `client` tag `/sign`
+ * adds to every event signed through it. See `domain/delegation.ts`.
+ */
+export interface SessionDelegate {
+  clientId: string
+  tag: string
+}
+
 export interface Session {
   id: string
   userId: string
+  /** Absent for the person's own session — every session before PER-22. */
+  delegate?: SessionDelegate | undefined
 }
 
 function hashToken(token: string): Buffer {
@@ -27,36 +40,84 @@ export async function createSession(input: {
   userId: string
   credentialId?: string | undefined
   userAgent?: string | undefined
-}): Promise<{ token: string; expiresAt: Date }> {
+  /** Makes this a delegated session, with its own, shorter lifetime. */
+  delegate?: SessionDelegate | undefined
+}): Promise<{ id: string; token: string; expiresAt: Date }> {
+  const cfg = config()
   const token = randomBytes(32).toString('base64url')
-  const expiresAt = new Date(Date.now() + config().SESSION_TTL_SECONDS * 1000)
+  const ttl = input.delegate ? cfg.DELEGATED_SESSION_TTL_SECONDS : cfg.SESSION_TTL_SECONDS
+  const expiresAt = new Date(Date.now() + ttl * 1000)
 
-  await query(
-    `insert into sessions (user_id, token_hash, credential_id, expires_at, user_agent)
-     values ($1, $2, $3, $4, $5)`,
+  const row = await queryOne<{ id: string }>(
+    `insert into sessions
+       (user_id, token_hash, credential_id, expires_at, user_agent, delegate_client_id, delegate_tag)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     returning id`,
     [
       input.userId,
       hashToken(token),
       input.credentialId ?? null,
       expiresAt,
       input.userAgent ?? null,
+      input.delegate?.clientId ?? null,
+      input.delegate?.tag ?? null,
     ],
   )
-  return { token, expiresAt }
+  if (!row) throw new Error('session insert returned nothing')
+  return { id: row.id, token, expiresAt }
+}
+
+interface SessionRow {
+  id: string
+  user_id: string
+  delegate_client_id: string | null
+  delegate_tag: string | null
+}
+
+function toSession(row: SessionRow): Session {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    delegate:
+      row.delegate_client_id && row.delegate_tag
+        ? { clientId: row.delegate_client_id, tag: row.delegate_tag }
+        : undefined,
+  }
 }
 
 /** Resolve a session token, or undefined if absent, expired or revoked. */
 export async function resolveSession(token: string): Promise<Session | undefined> {
-  const row = await queryOne<{ id: string; user_id: string }>(
+  const row = await queryOne<SessionRow>(
     `update sessions
         set last_seen_at = now()
       where token_hash = $1
         and revoked_at is null
         and expires_at > now()
-      returning id, user_id`,
+      returning id, user_id, delegate_client_id, delegate_tag`,
     [hashToken(token)],
   )
-  return row ? { id: row.id, userId: row.user_id } : undefined
+  return row ? toSession(row) : undefined
+}
+
+/**
+ * A session by id, **live or not** — for the grants that carry a session id
+ * rather than a cookie (the code and refresh grants).
+ *
+ * Returned whatever its state, with `live` beside it, because the question
+ * those grants ask is "was this a bot's?" first. A lookup that answered nothing
+ * for an ended session would make an ended delegation indistinguishable from a
+ * person's own session, and the token would come out without `act`.
+ */
+export async function findSessionById(
+  sessionId: string,
+): Promise<(Session & { live: boolean }) | undefined> {
+  const row = await queryOne<SessionRow & { live: boolean }>(
+    `select id, user_id, delegate_client_id, delegate_tag,
+            (revoked_at is null and expires_at > now()) as live
+       from sessions where id = $1`,
+    [sessionId],
+  )
+  return row ? { ...toSession(row), live: row.live } : undefined
 }
 
 export async function revokeSession(token: string): Promise<void> {

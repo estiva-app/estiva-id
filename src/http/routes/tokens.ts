@@ -38,11 +38,16 @@ import { findAppPolicy } from '../../domain/apps.js'
 import { ownerAttestation } from '../../domain/attestation.js'
 import { recordAudit } from '../../domain/audit.js'
 import { redeemAuthorizationCode } from '../../domain/authorization.js'
-import { discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
+import { type TokenDelegate, discoveryDocument, issueToken, publicJwks } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { issueRefreshToken, redeemRefreshToken } from '../../domain/refresh.js'
 import { authenticateServiceCredential } from '../../domain/roles.js'
-import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
+import {
+  SESSION_COOKIE,
+  type Session,
+  findSessionById,
+  resolveSession,
+} from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden, unauthenticated } from '../../errors.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
@@ -130,6 +135,22 @@ function tokenResponse(
   }
 }
 
+/**
+ * The `act` a token minted from this session carries, if a bot holds it
+ * (PER-22). Every grant that starts from a session goes through here, so none
+ * of them can mint a bot's token that looks like the person's.
+ */
+function tokenDelegate(session: Session): TokenDelegate | undefined {
+  return session.delegate
+    ? { clientId: session.delegate.clientId, sessionId: session.id }
+    : undefined
+}
+
+/** The audit detail naming the bot, when there is one. */
+function delegateDetail(delegate: TokenDelegate | undefined): { delegate?: string } {
+  return delegate ? { delegate: delegate.clientId } : {}
+}
+
 export function tokenRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
@@ -207,6 +228,7 @@ export function tokenRoutes(): Hono<AppEnv> {
     const session = await resolveSession(token)
     if (!session) throw unauthenticated('Session expired or revoked')
     const { userId } = session
+    const delegate = tokenDelegate(session)
 
     const parsed = sessionGrantSchema.safeParse(body)
     if (!parsed.success) throw badRequest('Expected { clientId }')
@@ -236,7 +258,7 @@ export function tokenRoutes(): Hono<AppEnv> {
     const pubkey = await getActivePubkey(userId)
     if (!pubkey) throw forbidden('No active key for this identity')
 
-    const issued = await issueToken({ pubkey, clientId: app.clientId })
+    const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
 
     await recordAudit({
       actorType: 'user',
@@ -245,7 +267,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.issue',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn },
+      detail: { expiresIn: issued.expiresIn, ...delegateDetail(delegate) },
       requestId: c.get('requestId'),
     })
 
@@ -315,7 +337,27 @@ export function tokenRoutes(): Hono<AppEnv> {
     const pubkey = await getActivePubkey(redemption.userId)
     if (!pubkey) throw forbidden('No active key for this identity')
 
-    const issued = await issueToken({ pubkey, clientId: app.clientId })
+    /*
+      Whether the session that approved this code was a bot's (PER-22). Looked
+      up rather than carried on the code, so there is one place that says so —
+      and a delegation revoked in the minute since `/authorize` ends here.
+    */
+    const approving = redemption.sessionId ? await findSessionById(redemption.sessionId) : undefined
+    if (approving?.delegate && !approving.live) {
+      await recordAudit({
+        actorType: 'app',
+        actorUserId: redemption.userId,
+        actorClientId: app.clientId,
+        action: 'token.exchange',
+        outcome: 'refused',
+        detail: { reason: 'delegation_ended', delegate: approving.delegate.clientId },
+        requestId: c.get('requestId'),
+      })
+      throw badRequest('invalid_grant')
+    }
+    const delegate = approving ? tokenDelegate(approving) : undefined
+
+    const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
 
     /**
      * A refresh token, so the access token above can be short again (PEEK-108).
@@ -340,7 +382,11 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.exchange',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn, refresh: refresh !== null },
+      detail: {
+        expiresIn: issued.expiresIn,
+        refresh: refresh !== null,
+        ...delegateDetail(delegate),
+      },
       requestId: c.get('requestId'),
     })
 
@@ -408,7 +454,13 @@ export function tokenRoutes(): Hono<AppEnv> {
     const pubkey = await getActivePubkey(redemption.userId)
     if (!pubkey) throw forbidden('No active key for this identity')
 
-    const issued = await issueToken({ pubkey, clientId: app.clientId })
+    // `redeemRefreshToken` checked the session a moment ago; checked again,
+    // because a delegation revoked in between must not refresh without `act`.
+    const session = await findSessionById(redemption.sessionId)
+    if (session?.delegate && !session.live) throw badRequest('invalid_grant')
+    const delegate = session ? tokenDelegate(session) : undefined
+
+    const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
 
     await recordAudit({
       actorType: 'app',
@@ -417,7 +469,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.refresh',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn },
+      detail: { expiresIn: issued.expiresIn, ...delegateDetail(delegate) },
       requestId: c.get('requestId'),
     })
 

@@ -44,6 +44,7 @@ import { type Context, Hono } from 'hono'
 import { z } from 'zod'
 import { findAppPolicy } from '../../domain/apps.js'
 import { recordAudit } from '../../domain/audit.js'
+import { checkDelegation } from '../../domain/delegation.js'
 import { verifyToken } from '../../domain/jwt.js'
 import { findSignerByPubkey, withUserSecretKey } from '../../domain/keys.js'
 import { evaluateEncryptionPolicy } from '../../domain/policy.js'
@@ -114,7 +115,9 @@ interface Caller {
  */
 async function authorize(c: Context<AppEnv>, operation: Operation): Promise<Caller> {
   const requestId = c.get('requestId')
-  const { pubkey, clientId } = await verifyToken(bearerToken(c.req.header('authorization')))
+  const { pubkey, clientId, delegate } = await verifyToken(
+    bearerToken(c.req.header('authorization')),
+  )
 
   const refuse = async (reason: string, userId?: string) => {
     await recordAudit({
@@ -150,6 +153,16 @@ async function authorize(c: Context<AppEnv>, operation: Operation): Promise<Call
   if (signer.userStatus !== 'active') {
     await refuse(`user_${signer.userStatus}`, signer.userId)
     throw forbidden('That identity is no longer active')
+  }
+
+  // A bot reading or writing as this person (PER-22): re-checked every call,
+  // like `/sign`, so a revoked delegation cannot decrypt the next message.
+  if (delegate) {
+    const check = await checkDelegation(delegate)
+    if (!check.ok || check.userId !== signer.userId) {
+      await refuse(check.ok ? 'delegation_unknown' : check.reason, signer.userId)
+      throw unauthenticated('That delegation has ended')
+    }
   }
 
   // No kind to check here, so this is the `status` gate and the shared refusal

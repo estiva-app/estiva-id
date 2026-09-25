@@ -87,6 +87,29 @@ const schema = z.object({
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(600),
 
   /**
+   * How long a session a person granted to their bot lives (PER-22).
+   *
+   * About a day, as approved: long enough for an afternoon of checks, short
+   * enough that a forgotten grant ends on its own. Revoking it is immediate
+   * regardless — this is the ceiling, not the lever.
+   */
+  DELEGATED_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24),
+
+  /**
+   * How long an access token minted from a delegated session lives.
+   *
+   * Shorter than {@link JWT_TTL_SECONDS} because a revocation reaches this
+   * service's own endpoints on the next request, but reaches a relying party
+   * that validates statelessly (Convex) only when the token expires. Five
+   * minutes bounds that; the refresh grant keeps the apps working in between.
+   */
+  DELEGATED_JWT_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  /**
    * URL prefixes that a NIP-98 (kind 27235) event may target. Empty means
    * **refuse all 27235 signing** — the relay bridge host follows from PEEK-33,
    * and fail-closed matches Buzz's own posture on `pubkey_allowlist`.
