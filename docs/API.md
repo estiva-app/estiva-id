@@ -893,3 +893,64 @@ The rate limit is a **per-process** counter (`src/http/rate-limit.ts`). Estiva I
 runs as one container, so that is a per-deployment limit today; it would not be
 under two replicas, and anything that scales this service out has to move the
 counter into Postgres or Redis first.
+
+## A bot signed in as its owner (PER-22)
+
+The device flow (RFC 8628's shape, `npm login`'s UX). A **personal bot**, meaning a
+role identity with an owner, asks for a session as that owner, and the owner
+approves it with a passkey. The bot receives a **session**, not an access token,
+because its consumer is a headless browser driving the real apps through
+`/authorize`.
+
+| Call | Who | Body → answer |
+| --- | --- | --- |
+| `POST /device/authorize` | bot | `{ clientId, clientSecret, label? }` → `{ device_code, user_code, verification_uri, verification_uri_complete, expires_in: 600, interval: 5 }` |
+| `GET /device/requests/:code` | person | what is asking: `{ botName, clientId, label, ownerDisplayName, expiresAt, sessionHours }` |
+| `POST /device/requests/:code/options` | person | WebAuthn options, with the challenge bound to this request |
+| `POST /device/requests/:code/approve` | person | a passkey assertion → `{ approved: true }` |
+| `POST /device/requests/:code/deny` | anyone with the code | `{ denied: true }` |
+| `POST /device/token` | bot | `{ deviceCode, clientId, clientSecret }` → `{ session_token, cookie_name, expires_at, pubkey, delegate_tag }` |
+| `GET /me/delegations`, `POST /me/delegations/:id/revoke` | person | list and revoke, from the account page |
+
+The person-facing page is `/device?code=XXXX-XXXX`.
+
+- **Only the bot's owner can approve**, and the check runs after the assertion
+  verifies. A workspace role has no owner, so it cannot ask (`401 invalid_client`).
+- **Approval is its own ceremony** (`delegation`). A cookie the person already
+  holds approves nothing.
+- `/device/token` answers RFC 8628's errors as `400 { error }`:
+  `authorization_pending`, `slow_down`, `access_denied`, `expired_token` and
+  `invalid_grant`. The last covers a collected, unknown or other-bot code. The
+  secret is required again, so a leaked device code is worthless.
+- **The session reaches app sign-in only.** `requireSession` refuses it with
+  `403 detail.reason: delegated_session`, audited as `session.delegate_refused`.
+  Only `/me`, `/auth/logout`, `/authorize` and `/token` accept it. It lasts
+  `DELEGATED_SESSION_TTL_SECONDS` (24h).
+- **Every token minted from it** carries `act: { sub: <bot client id> }` and
+  `sid`, and lives `DELEGATED_JWT_TTL_SECONDS` (300s).
+- **`/sign`, `/nip44/*` and `/directory/*` re-check the delegation on every
+  call.** A revoke, a retired bot or a disabled credential answers the very next
+  request with `401 That delegation has ended` (`sign.refused`,
+  `delegation_ended`), not when the token expires.
+- `/sign` replaces any `client` tag with `["client", "<bot-client-id>-as-<owner>"]`.
+  `sign.granted`, `token.*` and `authorize.issue` rows carry `detail.delegate`.
+
+## Test accounts (PER-22)
+
+`POST /auth/test-login { email, secret }` → the session cookie, plus
+`{ pubkey, session_token, cookie_name, expires_at }` for a harness with no
+cookie jar. The result is an **ordinary member session**, not a delegated one.
+
+- **Only a test account can hold a secret, and the schema enforces it.**
+  `test_credentials` references `users (id, test_account)` with a composite
+  foreign key that resolves only to `true`. A test account is always a human
+  `member`: never an admin, never a bot (`users_test_account_is_a_member`).
+- **Outside this service they are ordinary people.** Their `kind:0` carries no
+  marker, and their messages light dots like anyone's.
+- Every refusal is `401 invalid_credentials`. The reason (`unknown`,
+  `bad_secret` or `not_active`) is audited as `session.create` with
+  `method: test_credential`. The limit is 10 attempts per minute per account.
+- Created and rotated from the box only:
+  `docker compose run --rm -T -e EMAIL=… -e DISPLAY_NAME=… -e HANDLE=… estiva-id node dist/admin/create-test-account.js`
+  (`-e ROTATE=1` replaces the secret). The command admits the pubkey and
+  publishes the profile, as enrolment does.
