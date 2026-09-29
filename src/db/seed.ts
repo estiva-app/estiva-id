@@ -300,6 +300,12 @@ export const SEED_APPS: readonly SeedApp[] = [
     // this list is only the first.
     // 1852 is the Folder command, for the reason recorded on Peek's list above.
     // Not 30890: the state is the relay's to sign.
+    // 9002 is renaming a Folder (FOL-8, ship#208): NIP-29's edit-metadata on the
+    // channel, which Ship publishes before the 1852 that renames the state. Peek
+    // has had it for the same act. Refused here on production, 2026-09-29, as
+    // "App estiva-ship may not sign kind 9002", after create (9007 + 1852) had
+    // worked — so Ship could make a Folder it could not rename. Not 9008:
+    // deleting a Folder stays Peek's.
     // 24242 is Blossom authorization — see Peek's entry above for the shape.
     // Ship gets it for the READ half first: media GET is unconditionally
     // authenticated, so without this Ship cannot display an attachment Peek
@@ -320,7 +326,7 @@ export const SEED_APPS: readonly SeedApp[] = [
     // refuses a REQ before auth outright, so none of it can be proved end to
     // end without this.
     allowedKinds: [
-      30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
+      30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
     ],
     nip98UrlPrefixes: [],
     // The other half of 22242, and the old comment's own condition: it said the
