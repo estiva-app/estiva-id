@@ -800,8 +800,10 @@ Per-app rows in `app_credentials`:
 
 | App | `client_id` | Kinds |
 | --- | --- | --- |
-| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242 |
-| Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 31989, 27235, 1111, 30078 |
+| Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851, 40003, 1852, 24242, 30840 |
+| Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242 |
+
+`src/db/seed.ts` is the source; this table is its copy and has lagged it before.
 
 **9007 is the container, not an afterthought.** Ship's Folder carries the `h`
 tag every project, issue, change and message references, and `createProject`

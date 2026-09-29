@@ -318,6 +318,16 @@ describe('the Folder command', () => {
     }
   })
 
+  it('lets both apps rename a Folder, and only Peek delete one (FOL-8)', () => {
+    // A rename is `9002` on the channel, then `1852` on the state; without the
+    // first, Ship could create a Folder and never rename it — measured on
+    // production, 2026-09-29. Deleting stays out of Ship by decision.
+    for (const client of ['estiva-peek', 'estiva-ship'] as const) {
+      expect(app(client).allowedKinds).toContain(PEEK.EDIT_CHANNEL_METADATA)
+    }
+    expect(app('estiva-ship').allowedKinds).not.toContain(PEEK.DELETE_GROUP)
+  })
+
   it('does not grant the state kind to anybody', () => {
     // `is_relay_only_kind` refuses a 30890 from any client, so a ceiling that
     // allowed it would be wider than the wire — and a refusal whose reason is
