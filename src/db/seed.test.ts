@@ -96,11 +96,13 @@ describe('seeded signing policies', () => {
       else already agreed. Asserted here so the next borrowed kind is a failing
       test rather than a screenshot.
 
-      Not 30850: Ship declares no action that creates a project, and a ceiling
-      wider than any manifest asks for grants what nobody requested.
+      30850 since MAN-8. This used to assert Peek could *not* sign a project,
+      because Ship declared no action creating one. MAN-4 declared
+      `add-project` on a Folder, and Peek now offers it there — so the old
+      assertion was a /sign refusal waiting for the first person to click.
     */
     expect(app('estiva-peek').allowedKinds).toContain(SHIP.ISSUE)
-    expect(app('estiva-peek').allowedKinds).not.toContain(SHIP.PROJECT)
+    expect(app('estiva-peek').allowedKinds).toContain(SHIP.PROJECT)
   })
 
   it('lets both apps sign the read-state kind', () => {
