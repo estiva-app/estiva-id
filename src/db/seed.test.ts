@@ -162,6 +162,15 @@ describe('seeded signing policies', () => {
     // one thing this file cannot do. The box is where that is checked.
   })
 
+  it('lets Leaf sign in to the relay and nothing else, sent back only to its own addresses', () => {
+    // Leaf saves nothing of its own yet. A kind here it does not use is a grant
+    // nobody asked for, so the list is exact rather than `toContain`: adding a
+    // kind for Leaf should have to change this line.
+    expect([...app('estiva-leaf').allowedKinds].sort()).toEqual([22242, 27235])
+    expect(app('estiva-leaf').relayAuthUrls()).toEqual([...config().SIGN_RELAY_AUTH_ALLOWED_URLS])
+    expect(app('estiva-leaf').redirectUris()).toEqual([...config().LEAF_REDIRECT_URIS])
+  })
+
   it('scopes Peek to the deployment’s relays and nothing wider', () => {
     // The app column can only narrow — `policy.ts` ANDs it with the deployment
     // bound — but seeding it from anywhere other than that bound would make the

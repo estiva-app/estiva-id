@@ -346,6 +346,20 @@ export const SEED_APPS: readonly SeedApp[] = [
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().SHIP_REDIRECT_URIS],
   },
+  {
+    clientId: 'estiva-leaf',
+    name: 'Estiva Leaf',
+    // A new app (estiva-app/leaf) that saves nothing of its own yet, so the
+    // least it can sign in with: 22242 to answer the relay's challenge on its
+    // one socket, paired with the deployment's relay list as the other apps'
+    // is, and 27235 because every app holds NIP-98 (see the test). Each kind
+    // Leaf adds to its `KINDS` has to be added here too, or its first save is
+    // refused at /sign after every screen has worked.
+    allowedKinds: [27235, 22242],
+    nip98UrlPrefixes: [],
+    relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
+    redirectUris: () => [...config().LEAF_REDIRECT_URIS],
+  },
 ]
 
 /*
