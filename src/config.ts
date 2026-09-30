@@ -195,6 +195,7 @@ const schema = z.object({
    */
   PEEK_REDIRECT_URIS: commaSeparated,
   SHIP_REDIRECT_URIS: commaSeparated,
+  LEAF_REDIRECT_URIS: commaSeparated,
 })
 
 export type Config = z.infer<typeof schema>
