@@ -132,8 +132,10 @@ describe('a caller may only sign as itself', () => {
 
 describe('per-app policy (PEEK-71)', () => {
   it('refuses a kind outside the calling app’s list', async () => {
-    // 30850 is Linear-lite's kind. Peek's token must not reach it.
-    const response = await sign(peekToken, { kind: 30850, tags: [], content: '' })
+    // 31989 is Ship's handler recommendation, and Peek's token must not reach
+    // it. This was 30850 until MAN-8 granted Peek the project kind, because
+    // Peek now files Ship's `add-project` in a Folder.
+    const response = await sign(peekToken, { kind: 31989, tags: [], content: '' })
     expect(response.status).toBe(422)
     await expect(response.json()).resolves.toMatchObject({
       error: { code: 'policy_violation', detail: { reason: 'kind_not_allowed' } },
@@ -148,8 +150,8 @@ describe('per-app policy (PEEK-71)', () => {
   })
 
   it('applies the calling app’s policy, not the other app’s', async () => {
-    expect((await sign(shipToken, { kind: 30850, tags: [], content: '' })).status).toBe(200)
-    expect((await sign(peekToken, { kind: 30850, tags: [], content: '' })).status).toBe(422)
+    expect((await sign(shipToken, { kind: 31989, tags: [], content: '' })).status).toBe(200)
+    expect((await sign(peekToken, { kind: 31989, tags: [], content: '' })).status).toBe(422)
   })
 
   it('refuses kind:0 for every app', async () => {
