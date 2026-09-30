@@ -184,8 +184,14 @@ export const SEED_APPS: readonly SeedApp[] = [
     // arriving to fix a feature that looks finished rather than to enable a new
     // one.
     //
-    // Only 30851, not 30850: Ship declares no action that creates a project, so
-    // a ceiling covering one would grant more than any manifest asks for.
+    // 30850 is Ship's Project, and the reason it was withheld stopped being true.
+    // This said "only 30851, not 30850: Ship declares no action that creates a
+    // project". Since MAN-4 it does — `add-project`, `appliesTo: "39000"`, a
+    // project made in a Folder — and since MAN-8 Peek offers it on a Folder
+    // (interop 0.40.0 borrows a creation another app declares on a kind). Peek
+    // takes the kind from `emits.kind` in Ship's manifest, as with 30851 above;
+    // the Folder command that lists it is 1852, already granted below. **Sixth
+    // time** — granted with the change that needs it, not after /sign refuses.
     //
     // **Fifth time**, and the paragraph above predicted it. 1852 is the Folder
     // command: a client asks the relay to change a Folder's contents and the
@@ -227,7 +233,7 @@ export const SEED_APPS: readonly SeedApp[] = [
     // nobody exercises is a grant nobody notices is wrong.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852, 24242, 30840,
+      40003, 1852, 24242, 30840, 30850,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
