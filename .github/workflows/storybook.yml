@@ -1,0 +1,26 @@
+name: storybook
+
+# Estiva ID's Storybook on Cloudflare Pages: main at id-storybook.estiva.app, a preview at
+# <branch>.estiva-id-storybook.pages.dev for a concept/* branch or a pull
+# request labelled `storybook` (Miky, 2026-10-12 — not every push, which would
+# have been ~1,100 runs a month across the apps). The workflow lives in
+# estiva-foundation; Cloudflare Access decides who may open it.
+
+on:
+  push:
+    branches: [main, 'concept/**']
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: storybook-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  storybook:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'storybook')
+    uses: estiva-app/estiva-foundation/.github/workflows/storybook-pages.yml@ci-v2
+    with:
+      project: estiva-id-storybook
+    secrets: inherit
