@@ -35,14 +35,14 @@
     "db:down": "docker compose down"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.0",
+    "@hono/node-server": "^2.1.4",
     "@noble/ciphers": "^2.3.0",
     "@noble/curves": "^1.8.1",
     "@noble/hashes": "^1.7.1",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.1.1",
     "@tabler/icons-react": "^3.46.0",
-    "hono": "^4.7.4",
+    "hono": "^4.13.13",
     "jose": "^6.0.8",
     "pg": "^8.13.3",
     "pino": "^9.6.0",
@@ -65,6 +65,6 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vite": "^8.2.1",
-    "vitest": "^3.0.7"
+    "vitest": "^4.1.11"
   }
 }
