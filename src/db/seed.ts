@@ -355,13 +355,22 @@ export const SEED_APPS: readonly SeedApp[] = [
   {
     clientId: 'estiva-leaf',
     name: 'Estiva Leaf',
-    // A new app (estiva-app/leaf) that saves nothing of its own yet, so the
-    // least it can sign in with: 22242 to answer the relay's challenge on its
-    // one socket, paired with the deployment's relay list as the other apps'
-    // is, and 27235 because every app holds NIP-98 (see the test). Each kind
-    // Leaf adds to its `KINDS` has to be added here too, or its first save is
-    // refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242],
+    // Leaf (estiva-app/leaf) writes pages in Folders: Leaf 1's milestone,
+    // granted in one re-seed (LEAF-2; Miky, at its kickoff, 14 October).
+    // 22242 answers the relay's challenge on its one socket, paired with the
+    // deployment's relay list as the other apps' is, and 27235 because every
+    // app holds NIP-98 (see the test).
+    //
+    // 30840 is a page, which is a bare file (SPEC §6.7), and 1852 the Folder
+    // command that lists it: together §3.2's create-file, as Peek's "New
+    // topic". Not 30890: the state is the relay's to sign. 1851 is a change to
+    // a page's title or text (its `description` fold). 1111 is a comment
+    // beside a block, 40003 editing one, and 5 deleting a page or a comment.
+    // 24242 is Blossom authorization, for the READ half first as Ship's is:
+    // media GET is authenticated, so a page cannot show an attachment without
+    // it. Each kind Leaf adds to its `KINDS` has to be added here too, or its
+    // first save is refused at /sign after every screen has worked.
+    allowedKinds: [27235, 22242, 30840, 1852, 1851, 1111, 40003, 5, 24242],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],
