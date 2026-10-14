@@ -49,6 +49,11 @@ const BUZZ = {
    * apps render its aspects, and typed kinds add properties on top of it.
    */
   BARE_FILE: 30840,
+  /**
+   * The document — a file type an app owns through its manifest, as Ship owns
+   * an issue (SPEC, decided by Miky 2026-10-14). Leaf owns it.
+   */
+  DOCUMENT: 30842,
 } as const
 
 describe('seeded signing policies', () => {
@@ -164,10 +169,10 @@ describe('seeded signing policies', () => {
     // one thing this file cannot do. The box is where that is checked.
   })
 
-  it("lets Leaf sign in and write Leaf 1's pages, changes and comments, sent back only to its own addresses", () => {
+  it("lets Leaf sign in and write Leaf 1's documents, changes and comments, sent back only to its own addresses", () => {
     // A kind here Leaf does not use is a grant nobody asked for, so the list is
     // exact rather than `toContain`: adding a kind for Leaf should have to
-    // change this line. 22242 and 27235 are sign-in; 5 deletes a page or a
+    // change this line. 22242 and 27235 are sign-in; 5 deletes a document or a
     // comment.
     expect([...app('estiva-leaf').allowedKinds].sort((a, b) => a - b)).toEqual(
       [
@@ -178,12 +183,14 @@ describe('seeded signing policies', () => {
         22242,
         BUZZ.BLOSSOM_AUTH,
         27235,
-        BUZZ.BARE_FILE,
+        BUZZ.DOCUMENT,
         BUZZ.MESSAGE_EDIT,
       ].sort((a, b) => a - b),
     )
-    // Never the Folder's state, which the relay signs.
+    // Never the Folder's state, which the relay signs, and never a topic: a
+    // document is not a bare file, and Leaf makes only documents.
     expect(app('estiva-leaf').allowedKinds).not.toContain(BUZZ.FOLDER_STATE)
+    expect(app('estiva-leaf').allowedKinds).not.toContain(BUZZ.BARE_FILE)
     expect(app('estiva-leaf').relayAuthUrls()).toEqual([...config().SIGN_RELAY_AUTH_ALLOWED_URLS])
     expect(app('estiva-leaf').redirectUris()).toEqual([...config().LEAF_REDIRECT_URIS])
   })

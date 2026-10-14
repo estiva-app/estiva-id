@@ -355,22 +355,25 @@ export const SEED_APPS: readonly SeedApp[] = [
   {
     clientId: 'estiva-leaf',
     name: 'Estiva Leaf',
-    // Leaf (estiva-app/leaf) writes pages in Folders: Leaf 1's milestone,
+    // Leaf (estiva-app/leaf) writes documents in Folders: Leaf 1's milestone,
     // granted in one re-seed (LEAF-2; Miky, at its kickoff, 14 October).
     // 22242 answers the relay's challenge on its one socket, paired with the
     // deployment's relay list as the other apps' is, and 27235 because every
     // app holds NIP-98 (see the test).
     //
-    // 30840 is a page, which is a bare file (SPEC §6.7), and 1852 the Folder
-    // command that lists it: together §3.2's create-file, as Peek's "New
-    // topic". Not 30890: the state is the relay's to sign. 1851 is a change to
-    // a page's title or text (its `description` fold). 1111 is a comment
-    // beside a block, 40003 editing one, and 5 deleting a page or a comment.
+    // 30842 is a document, the file type Leaf owns through its manifest, and
+    // 1852 the Folder command that lists it. Never 30840: a document is its
+    // own type, not a Peek topic, and Leaf makes no topics (Miky, 14 October).
+    // Not 30890: the state is the relay's to sign. 1851 is a change to a
+    // document's title or text (its `description` fold). 1111 is a comment
+    // beside a block, 40003 editing one, and 5 deleting a document or a
+    // comment. Leaf's manifest (31990) is signed by its own manifest key, not
+    // through here.
     // 24242 is Blossom authorization, uploads and reads alike (the policy
-    // cannot tell them apart): media GET is authenticated, so a page cannot
+    // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242, 30840, 1852, 1851, 1111, 40003, 5, 24242],
+    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],
