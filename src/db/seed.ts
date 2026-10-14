@@ -366,9 +366,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // topic". Not 30890: the state is the relay's to sign. 1851 is a change to
     // a page's title or text (its `description` fold). 1111 is a comment
     // beside a block, 40003 editing one, and 5 deleting a page or a comment.
-    // 24242 is Blossom authorization, for the READ half first as Ship's is:
-    // media GET is authenticated, so a page cannot show an attachment without
-    // it. Each kind Leaf adds to its `KINDS` has to be added here too, or its
+    // 24242 is Blossom authorization, uploads and reads alike (the policy
+    // cannot tell them apart): media GET is authenticated, so a page cannot
+    // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
     allowedKinds: [27235, 22242, 30840, 1852, 1851, 1111, 40003, 5, 24242],
     nip98UrlPrefixes: [],
