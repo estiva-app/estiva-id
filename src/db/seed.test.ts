@@ -167,10 +167,23 @@ describe('seeded signing policies', () => {
   it("lets Leaf sign in and write Leaf 1's pages, changes and comments, sent back only to its own addresses", () => {
     // A kind here Leaf does not use is a grant nobody asked for, so the list is
     // exact rather than `toContain`: adding a kind for Leaf should have to
-    // change this line. Never 30890, which the relay signs.
-    expect([...app('estiva-leaf').allowedKinds].sort((a, b) => a - b)).toEqual([
-      5, 1111, 1851, 1852, 22242, 24242, 27235, 30840, 40003,
-    ])
+    // change this line. 22242 and 27235 are sign-in; 5 deletes a page or a
+    // comment.
+    expect([...app('estiva-leaf').allowedKinds].sort((a, b) => a - b)).toEqual(
+      [
+        5,
+        SHIP.COMMENT,
+        SHIP.CHANGE,
+        BUZZ.FOLDER_COMMAND,
+        22242,
+        BUZZ.BLOSSOM_AUTH,
+        27235,
+        BUZZ.BARE_FILE,
+        BUZZ.MESSAGE_EDIT,
+      ].sort((a, b) => a - b),
+    )
+    // Never the Folder's state, which the relay signs.
+    expect(app('estiva-leaf').allowedKinds).not.toContain(BUZZ.FOLDER_STATE)
     expect(app('estiva-leaf').relayAuthUrls()).toEqual([...config().SIGN_RELAY_AUTH_ALLOWED_URLS])
     expect(app('estiva-leaf').redirectUris()).toEqual([...config().LEAF_REDIRECT_URIS])
   })
