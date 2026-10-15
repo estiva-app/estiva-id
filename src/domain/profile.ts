@@ -37,6 +37,8 @@ export interface Profile {
    * A `role` account — a service identity, not a person (PEEK-34). Published
    * as NIP-24's `"bot": true`, so an app can tell a colleague from an agent
    * without asking this service (REM-3).
+   *
+   * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-agent-says-it-is-a-bot-in-its-profile.md
    */
   isBot: boolean
 }
