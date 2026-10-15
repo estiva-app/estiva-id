@@ -590,6 +590,8 @@ export function adminRoutes(): Hono<AppEnv> {
    * established there is no Folder boundary behind this, so `allowed_kinds` is
    * the entire containment for an agent. Granting a kind is a decision about
    * the whole workspace.
+   *
+   * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-agent-signs-for-an-app-only-by-an-admin-grant.md
    */
   routes.patch('/admin/credentials/:clientId/kinds', ...adminOnly, async (c) => {
     const { userId: actorUserId } = c.get('session')
