@@ -47,6 +47,7 @@ import {
   type Session,
   findSessionById,
   resolveSession,
+  touchSession,
 } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { badRequest, forbidden, unauthenticated } from '../../errors.js'
@@ -460,6 +461,8 @@ export function tokenRoutes(): Hono<AppEnv> {
     if (session?.delegate && !session.live) throw badRequest('invalid_grant')
     const delegate = session ? tokenDelegate(session) : undefined
 
+    // Accepted: the renewal is a use, and the sign-in's 7-day idle end moves forward.
+    await touchSession(redemption.sessionId)
     const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
 
     await recordAudit({

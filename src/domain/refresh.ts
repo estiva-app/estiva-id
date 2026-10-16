@@ -12,7 +12,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { query, withTransaction } from '../db/pool.js'
-import { liveSessionSql, touchSessionSql } from './sessions.js'
+import { liveSessionSql } from './sessions.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
 
@@ -144,14 +144,18 @@ export async function redeemRefreshToken(input: {
      * immediately, without having to find and revoke rows in this table.
      */
     /*
-      A renewal is a use, so the session's idle end moves forward before the
-      new token is written, and the token ends when the session would if this
-      were its last use: the earlier of the two ends. The 14 days never move.
+      The new token ends when the session would if this renewal were its last
+      use: 7 days from now for a person's sign-in, never past its 14 days. The
+      session itself records the use only once the route has also accepted the
+      app and the person (`touchSession`), so a refused renewal keeps nothing
+      alive.
     */
     const session = await client.query<{ ends_at: Date }>(
-      `update sessions set ${touchSessionSql('$2')}
-        where id = $1 and ${liveSessionSql()}
-        returning ${sessionEndSql} as ends_at`,
+      `select least(expires_at,
+                    case when idle_expires_at is null then expires_at
+                         else now() + make_interval(secs => $2) end) as ends_at
+         from sessions
+        where id = $1 and ${liveSessionSql()}`,
       [row.session_id, config().SESSION_IDLE_SECONDS],
     )
     const sessionExpiresAt = session.rows[0]?.ends_at

@@ -183,6 +183,22 @@ describe('a passkey sign-in', () => {
     near(session.expiresAt, Date.now() + 2 * DAY * 1000)
   })
 
+  it('is not kept alive by renewals that are refused', async () => {
+    const ada = await createUserWithKey({ email: 'ada@example.test', displayName: 'Ada' })
+    const session = await createSession({ userId: ada.id })
+    const first = await refreshTokenFor(`estiva_id_session=${session.token}`)
+
+    // One day of idle left, and the app's renewals are now refused.
+    await query("update sessions set idle_expires_at = now() + interval '1 day'")
+    await query("update app_credentials set status = 'disabled' where client_id = $1", [CLIENT])
+    expect((await renew(first)).status).toBe(403)
+
+    // So the sign-in still ends on its own day: a silent sign-in after it asks for the passkey.
+    await query("update app_credentials set status = 'active' where client_id = $1", [CLIENT])
+    await query("update sessions set idle_expires_at = idle_expires_at - interval '1 day 1 minute'")
+    expect((await silentSignIn(`estiva_id_session=${session.token}`)).error).toBe('login_required')
+  })
+
   it('stops renewing once it has gone 7 days unused', async () => {
     const ada = await createUserWithKey({ email: 'ada@example.test', displayName: 'Ada' })
     const session = await createSession({ userId: ada.id })

@@ -146,6 +146,20 @@ describe('login', () => {
     await expect(response.json()).resolves.toMatchObject({ verified: true, pubkey })
   })
 
+  /**
+   * The cookie is set once, at the tap, to the sign-in's 14-day end. Renewals
+   * never carry it, so a shorter cookie would vanish under someone who only
+   * renews and ask them for a tap on a sign-in that is still live.
+   */
+  it('keeps the passkey sign-in cookie for 14 days from the tap', async () => {
+    const { device } = await register('ada@example.test')
+    const options = (await (await post('/auth/login/options', {})).json()) as { challenge: string }
+    const response = await post('/auth/login/verify', device.authenticate(options.challenge))
+
+    const maxAge = Number(/Max-Age=(\d+)/.exec(response.headers.get('set-cookie') ?? '')?.[1])
+    expect(Math.abs(maxAge - 14 * 24 * 60 * 60)).toBeLessThan(60)
+  })
+
   it('refuses an unknown credential', async () => {
     await register('ada@example.test')
     const stranger = authenticator()

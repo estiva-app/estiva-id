@@ -18,7 +18,7 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { query, queryOne, withTransaction } from '../db/pool.js'
 import type { TokenDelegate } from './jwt.js'
-import { createSession } from './sessions.js'
+import { createSession, liveSessionSql } from './sessions.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
 
@@ -353,7 +353,7 @@ export async function checkDelegation(delegate: TokenDelegate): Promise<Delegati
     bot_status: string | null
   }>(
     `select s.user_id, s.delegate_client_id, s.delegate_tag,
-            (s.revoked_at is null and s.expires_at > now()) as live,
+            ${liveSessionSql('s')} as live,
             a.status as credential_status, bot.status as bot_status
        from sessions s
        left join app_credentials a on a.client_id = s.delegate_client_id
@@ -413,7 +413,7 @@ export async function listDelegations(userId: string): Promise<DelegationSummary
        from sessions s
        join app_credentials a on a.client_id = s.delegate_client_id
       where s.user_id = $1 and s.delegate_client_id is not null
-        and s.revoked_at is null and s.expires_at > now()
+        and ${liveSessionSql('s')}
       order by s.created_at desc`,
     [userId],
   )

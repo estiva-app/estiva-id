@@ -145,6 +145,14 @@ export async function resolveSession(token: string): Promise<Session | undefined
   return row ? toSession(row) : undefined
 }
 
+/** Record a use of a live session by id: a renewal the route accepted. */
+export async function touchSession(sessionId: string): Promise<void> {
+  await query(
+    `update sessions set ${touchSessionSql('$2')} where id = $1 and ${liveSessionSql()}`,
+    [sessionId, config().SESSION_IDLE_SECONDS],
+  )
+}
+
 /**
  * A session by id, **live or not** — for the grants that carry a session id
  * rather than a cookie (the code and refresh grants).
