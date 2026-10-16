@@ -626,6 +626,14 @@ ul.credentials li {
   color: var(--warning-strong);
 }
 
+/* Asked from anywhere on the page, so it stays in view however far down the button was. */
+.notice.confirm-notice {
+  display: block;
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+}
+
 .notice.error {
   background: var(--error-fill);
   border-color: var(--error-edge);

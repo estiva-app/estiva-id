@@ -5,9 +5,10 @@
  * `code` (see `docs/API.md`), so unwrapping it once means the UI can branch on
  * `code` and `detail.reason` rather than on message strings.
  */
-import type {
-  PublicKeyCredentialCreationOptionsJSON,
-  PublicKeyCredentialRequestOptionsJSON,
+import {
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON,
+  startAuthentication,
 } from '@simplewebauthn/browser'
 
 export type ErrorCode =
@@ -31,7 +32,62 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// --- Confirming it is still you (AUT-2) ---------------------------------------
+
+type ConfirmListener = (asking: boolean) => void
+const confirmListeners = new Set<ConfirmListener>()
+
+/**
+ * Hear when the page is asking for the passkey to confirm a change, so the
+ * person sees why a passkey sheet appeared. Returns the unsubscribe.
+ */
+export function onConfirmStep(listener: ConfirmListener): () => void {
+  confirmListeners.add(listener)
+  return () => confirmListeners.delete(listener)
+}
+
+/**
+ * The passkey assertion that moves this session's tap time. Any failure that
+ * is not the service's own answer — a cancelled or timed-out sheet — becomes
+ * one plain refusal, since nothing was changed either way.
+ */
+async function confirmItIsYou(): Promise<void> {
+  for (const listener of confirmListeners) listener(true)
+  try {
+    const options = await request<PublicKeyCredentialRequestOptionsJSON>('/auth/reauth/options', {
+      method: 'POST',
+    })
+    const assertion = await startAuthentication({ optionsJSON: options })
+    await request('/auth/reauth/verify', { method: 'POST', body: JSON.stringify(assertion) })
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError('forbidden', 'Not confirmed. Nothing changed.', 403, {
+      reason: 'reauth_cancelled',
+    })
+  } finally {
+    for (const listener of confirmListeners) listener(false)
+  }
+}
+
+/**
+ * Past 15 minutes from the last tap, changing passkeys, signing other devices
+ * out and an admin's access-granting actions answer `reauth_required`. Every
+ * caller gets the same answer to it: confirm with the passkey, then the one
+ * retry — so no screen has to know which actions are guarded.
+ */
+async function request<T>(path: string, init: RequestInit = {}, confirmed = false): Promise<T> {
+  try {
+    return await send<T>(path, init)
+  } catch (error) {
+    if (confirmed || !(error instanceof ApiError) || error.detail?.reason !== 'reauth_required') {
+      throw error
+    }
+    await confirmItIsYou()
+    return request<T>(path, init, true)
+  }
+}
+
+async function send<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: {

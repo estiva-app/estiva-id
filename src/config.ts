@@ -90,6 +90,21 @@ const schema = z.object({
     .default(60 * 60 * 24 * 7),
 
   /**
+   * How long after the last passkey tap the account can be changed without
+   * another one (AUT-2; Miky, 2026-10-16).
+   *
+   * Fifteen minutes. Past it, adding or removing a passkey, signing other
+   * devices out, and the admin actions that hand out access or a secret answer
+   * 403 `reauth_required` until the person confirms with their passkey. The
+   * confirmation moves `authenticated_at` only, never the 14-day end.
+   */
+  REAUTH_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 15),
+
+  /**
    * How long an access token lives.
    *
    * **Ten minutes again (PEEK-108).** It was raised to an hour because nothing

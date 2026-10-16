@@ -30,6 +30,8 @@ export interface Session {
   userId: string
   /** Absent for the person's own session — every session before PER-22. */
   delegate?: SessionDelegate | undefined
+  /** The last passkey tap: the sign-in, or a later confirmation (AUT-2). */
+  authenticatedAt: Date
 }
 
 function hashToken(token: string): Buffer {
@@ -115,12 +117,14 @@ interface SessionRow {
   user_id: string
   delegate_client_id: string | null
   delegate_tag: string | null
+  authenticated_at: Date
 }
 
 function toSession(row: SessionRow): Session {
   return {
     id: row.id,
     userId: row.user_id,
+    authenticatedAt: row.authenticated_at,
     delegate:
       row.delegate_client_id && row.delegate_tag
         ? { clientId: row.delegate_client_id, tag: row.delegate_tag }
@@ -139,10 +143,25 @@ export async function resolveSession(token: string): Promise<Session | undefined
         set ${touchSessionSql('$2')}
       where token_hash = $1
         and ${liveSessionSql()}
-      returning id, user_id, delegate_client_id, delegate_tag`,
+      returning id, user_id, delegate_client_id, delegate_tag, authenticated_at`,
     [hashToken(token), config().SESSION_IDLE_SECONDS],
   )
   return row ? toSession(row) : undefined
+}
+
+/**
+ * The person confirmed with their passkey in the session they are in (AUT-2).
+ *
+ * Moves the tap time and nothing else. `expires_at` was set from the sign-in's
+ * own tap and stays there, so confirming never makes a sign-in outlive its 14
+ * days. Returns false when the session ended in the meantime.
+ */
+export async function markReauthenticated(sessionId: string): Promise<boolean> {
+  const result = await query(
+    `update sessions set authenticated_at = now() where id = $1 and ${liveSessionSql()}`,
+    [sessionId],
+  )
+  return (result.rowCount ?? 0) > 0
 }
 
 /** Record a use of a live session by id: a renewal the route accepted. */
@@ -166,7 +185,7 @@ export async function findSessionById(
   sessionId: string,
 ): Promise<(Session & { live: boolean }) | undefined> {
   const row = await queryOne<SessionRow & { live: boolean }>(
-    `select id, user_id, delegate_client_id, delegate_tag,
+    `select id, user_id, delegate_client_id, delegate_tag, authenticated_at,
             ${liveSessionSql()} as live
        from sessions where id = $1`,
     [sessionId],
