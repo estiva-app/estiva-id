@@ -185,6 +185,8 @@ describe('seeded signing policies', () => {
         27235,
         BUZZ.DOCUMENT,
         BUZZ.MESSAGE_EDIT,
+        // Resolving a comment's thread, as Peek does (LEAF-5).
+        PEEK.ASSERTION,
       ].sort((a, b) => a - b),
     )
     // Never the Folder's state, which the relay signs, and never a topic: a

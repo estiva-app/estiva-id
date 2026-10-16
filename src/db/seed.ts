@@ -367,13 +367,15 @@ export const SEED_APPS: readonly SeedApp[] = [
     // Not 30890: the state is the relay's to sign. 1851 is a change to a
     // document's title or text (its `description` fold). 1111 is a comment
     // beside a block, 40003 editing one, and 5 deleting a document or a
-    // comment. Leaf's manifest (31990) is signed by its own manifest key, not
-    // through here.
+    // comment. 9101 resolves or reopens a comment's thread, the same assertion
+    // Peek writes, so a thread resolved in either app reads resolved in both
+    // (LEAF-5; Miky, at its kickoff, 16 October). Leaf's manifest (31990) is
+    // signed by its own manifest key, not through here.
     // 24242 is Blossom authorization, uploads and reads alike (the policy
     // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242],
+    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],
