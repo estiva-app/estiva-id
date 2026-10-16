@@ -63,6 +63,14 @@ async function signIn(cookie: string): Promise<TokenBody> {
 const refresh = (refreshToken: string, clientId = CLIENT) =>
   post({ grantType: 'refresh_token', refreshToken, clientId })
 
+/** Move a spent token's spend into the past, as the clock would. */
+const spentSecondsAgo = (refreshToken: string, seconds: number) =>
+  query(
+    `update refresh_tokens set used_at = used_at - make_interval(secs => $2)
+      where token_hash = $1`,
+    [createHash('sha256').update(refreshToken, 'utf8').digest(), seconds],
+  )
+
 let ada: Awaited<ReturnType<typeof createUserWithKey>>
 let sessionToken: string
 let cookie: string
@@ -155,6 +163,7 @@ describe('the refresh grant', () => {
   it('records a replay as an error rather than an ordinary refusal', async () => {
     const first = await signIn(cookie)
     await refresh(first.refresh_token as string)
+    await spentSecondsAgo(first.refresh_token as string, 31)
     await refresh(first.refresh_token as string)
 
     const rows = await query<{ outcome: string; detail: Record<string, unknown> }>(
@@ -212,6 +221,79 @@ describe('the refresh grant', () => {
     const response = await app.request('/.well-known/openid-configuration')
     const document = (await response.json()) as { grant_types_supported?: string[] }
     expect(document.grant_types_supported).toContain('refresh_token')
+  })
+
+  /**
+   * A renewal whose answer was lost — the laptop slept, the Wi-Fi dropped —
+   * leaves the app holding only the spent token. Retrying it within 30 seconds
+   * gets the same new token, and the app stays signed in (Miky, 2026-10-16).
+   */
+  describe('a retry within 30 seconds', () => {
+    it('gets the same new token, which still renews afterwards', async () => {
+      const first = await signIn(cookie)
+      const lost = (await (await refresh(first.refresh_token as string)).json()) as TokenBody
+      await spentSecondsAgo(first.refresh_token as string, 29)
+
+      const retried = await refresh(first.refresh_token as string)
+      expect(retried.status).toBe(200)
+      const body = (await retried.json()) as TokenBody
+      expect(body.refresh_token).toBe(lost.refresh_token)
+      expect(body.access_token).toBeTruthy()
+
+      expect((await refresh(body.refresh_token as string)).status).toBe(200)
+    })
+
+    it('ends the sign-in when it comes after 30 seconds', async () => {
+      const first = await signIn(cookie)
+      const lost = (await (await refresh(first.refresh_token as string)).json()) as TokenBody
+      await spentSecondsAgo(first.refresh_token as string, 31)
+
+      expect((await refresh(first.refresh_token as string)).status).toBe(400)
+      expect((await refresh(lost.refresh_token as string)).status).toBe(400)
+    })
+
+    it('ends the sign-in when another app presents it', async () => {
+      const first = await signIn(cookie)
+      const lost = (await (await refresh(first.refresh_token as string)).json()) as TokenBody
+
+      expect((await refresh(first.refresh_token as string, 'estiva-peek')).status).toBe(400)
+      expect((await refresh(lost.refresh_token as string)).status).toBe(400)
+    })
+
+    it('is refused once the sign-in has been ended', async () => {
+      const first = await signIn(cookie)
+      await refresh(first.refresh_token as string)
+      await revokeSession(sessionToken)
+
+      expect((await refresh(first.refresh_token as string)).status).toBe(400)
+    })
+
+    /** Only hashes are stored: the successor kept for a retry is sealed, not in the clear. */
+    it('keeps the new token only sealed, and drops it after the window', async () => {
+      const first = await signIn(cookie)
+      const lost = (await (await refresh(first.refresh_token as string)).json()) as TokenBody
+
+      const sealed = await query<{ successor_sealed: Buffer | null }>(
+        'select successor_sealed from refresh_tokens where successor_sealed is not null',
+      )
+      expect(sealed.rows).toHaveLength(1)
+      const stored = sealed.rows[0]?.successor_sealed as Buffer
+      expect(stored.includes(Buffer.from(lost.refresh_token as string, 'utf8'))).toBe(false)
+
+      // Any later renewal clears the ones past their 30 seconds.
+      await spentSecondsAgo(first.refresh_token as string, 31)
+      await refresh(lost.refresh_token as string)
+      const kept = await query<{ id: string }>(
+        `select r.id from refresh_tokens r
+          where r.successor_sealed is not null and r.token_hash = $1`,
+        [
+          createHash('sha256')
+            .update(first.refresh_token as string, 'utf8')
+            .digest(),
+        ],
+      )
+      expect(kept.rows).toHaveLength(0)
+    })
   })
 
   /** A malformed refresh request should not be reported as a broken code request. */
