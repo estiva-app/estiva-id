@@ -193,12 +193,15 @@ describe('the refresh grant', () => {
 
   /**
    * A refresh token must not be a way around session lifetime, so it expires
-   * with the session rather than on a clock of its own.
+   * when the session would if unused from now on — its idle end, never past
+   * its 14 days — rather than on a clock of its own.
    */
   it('never outlives the session that justified it', async () => {
     await signIn(cookie)
     const rows = await query<{ same: boolean }>(
-      `select r.expires_at = s.expires_at as same
+      // Within a millisecond: the end goes through a JS Date, which keeps no microseconds.
+      `select abs(extract(epoch from r.expires_at - least(s.expires_at, s.idle_expires_at))) < 0.001
+              and r.expires_at <= s.expires_at as same
          from refresh_tokens r join sessions s on s.id = r.session_id`,
     )
     expect(rows.rows).toHaveLength(1)

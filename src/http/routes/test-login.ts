@@ -14,9 +14,7 @@
  * is the same 401 to the caller; which one it was goes to the audit log.
  */
 import { Hono } from 'hono'
-import { setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { config } from '../../config.js'
 import { recordAudit } from '../../domain/audit.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { SESSION_COOKIE, createSession } from '../../domain/sessions.js'
@@ -24,8 +22,28 @@ import { authenticateTestAccount } from '../../domain/test-accounts.js'
 import { badRequest, rateLimited, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { createRateLimiter } from '../rate-limit.js'
+import { setSessionCookie } from './auth.js'
 
-const schema = z.object({ email: z.string().email(), secret: z.string().min(1) })
+/** Sixty days: past both ends of a sign-in, with room for a check that wants to be well past them. */
+const MAX_BACKDATE_SECONDS = 60 * 60 * 24 * 60
+const secondsAgo = z.number().int().min(0).max(MAX_BACKDATE_SECONDS)
+
+/**
+ * `tapped_ago_seconds` and `last_used_ago_seconds` start the sign-in as if the
+ * tap and its last use were that long ago, so a check reaches the 7-day idle
+ * end and the 14-day end on production without waiting a week. Test accounts
+ * only, like the route; a last use cannot come before the tap.
+ */
+const schema = z
+  .object({
+    email: z.string().email(),
+    secret: z.string().min(1),
+    tapped_ago_seconds: secondsAgo.optional(),
+    last_used_ago_seconds: secondsAgo.optional(),
+  })
+  .refine((body) => (body.last_used_ago_seconds ?? 0) <= (body.tapped_ago_seconds ?? 0), {
+    message: 'last_used_ago_seconds cannot be more than tapped_ago_seconds',
+  })
 
 /**
  * Ten a minute per account. A harness signs in once per run; a secret is 256
@@ -40,9 +58,18 @@ export function testLoginRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
   routes.post('/auth/test-login', async (c) => {
-    const cfg = config()
     const parsed = schema.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) throw badRequest('Expected { email, secret }')
+    if (!parsed.success) {
+      throw badRequest('Expected { email, secret, tapped_ago_seconds?, last_used_ago_seconds? }', {
+        issues: parsed.error.issues.map((issue) => issue.message),
+      })
+    }
+    const { tapped_ago_seconds: tappedAgoSeconds, last_used_ago_seconds: lastUsedAgoSeconds } =
+      parsed.data
+    const backdate =
+      tappedAgoSeconds !== undefined || lastUsedAgoSeconds !== undefined
+        ? { tappedAgoSeconds: tappedAgoSeconds ?? 0, lastUsedAgoSeconds: lastUsedAgoSeconds ?? 0 }
+        : undefined
 
     const budget = limiter.check(parsed.data.email.toLowerCase())
     if (!budget.allowed) {
@@ -67,7 +94,7 @@ export function testLoginRoutes(): Hono<AppEnv> {
 
     const [pubkey, session] = await Promise.all([
       getActivePubkey(result.userId),
-      createSession({ userId: result.userId, userAgent: c.req.header('user-agent') }),
+      createSession({ userId: result.userId, userAgent: c.req.header('user-agent'), backdate }),
     ])
 
     await recordAudit({
@@ -76,17 +103,11 @@ export function testLoginRoutes(): Hono<AppEnv> {
       action: 'session.create',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { method: 'test_credential' },
+      detail: { method: 'test_credential', ...(backdate ? { backdate } : {}) },
       requestId: c.get('requestId'),
     })
 
-    setCookie(c, SESSION_COOKIE, session.token, {
-      httpOnly: true,
-      sameSite: 'Lax',
-      secure: cfg.NODE_ENV === 'production',
-      path: '/',
-      maxAge: cfg.SESSION_TTL_SECONDS,
-    })
+    setSessionCookie(c, session.token, session.expiresAt)
     return c.json({
       pubkey,
       session_token: session.token,

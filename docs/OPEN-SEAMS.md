@@ -331,11 +331,11 @@ token keeps their Peek session until it expires.
 That window is `JWT_TTL_SECONDS`, currently **3600 seconds**. It is a config
 value, not a rewrite. Recorded so it is a decision rather than a surprise.
 
-It was 600 until browser sessions made ten minutes untenable: with no
-`refresh_token` grant (PEEK-108) an expired token costs a top-level redirect and
-whatever was on screen, so the TTL is carrying weight it was never meant to. The
-honest reading is that **this seam got worse to make another one bearable**, and
-a refresh grant is what lets both be right at once.
+It was 600 until browser sessions made ten minutes untenable: before the
+`refresh_token` grant (PEEK-108) an expired token cost a top-level redirect and
+whatever was on screen. The grant exists now, and the code default is 600
+again; production stays at 3600 until Ship and Leaf renew in place (project
+"Sign-in and auth, polished across the apps", milestone 3), and then goes back.
 
 ---
 
