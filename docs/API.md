@@ -668,6 +668,42 @@ third-party app is registered.
 
 ### `POST /token`
 
+Two request formats. **The standard one is the contract** (record
+[sign-in-is-plain-oauth](https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md),
+SPEC §4.4): what any OAuth 2.0 library sends. Estiva's own JSON format stays
+until Peek, Ship and Leaf have moved off it, and is then removed.
+
+#### The standard format
+
+`Content-Type: application/x-www-form-urlencoded`, with RFC 6749's names:
+
+```
+grant_type=authorization_code&code=…&redirect_uri=…&code_verifier=…&client_id=…
+grant_type=refresh_token&refresh_token=…&client_id=…
+grant_type=client_credentials&client_id=…&client_secret=…
+```
+
+A public client (every app) sends only its `client_id`; a bot's
+`client_credentials` request sends its secret in the body (`client_secret_post`).
+Discovery advertises both as `token_endpoint_auth_methods_supported`. A
+parameter with no value counts as absent, one sent twice is refused, and ones
+this service does not use (`scope`) are ignored. A form request never falls
+back to the session-cookie grant below.
+
+A refusal is RFC 6749 §5.2's shape, `{"error": "…", "error_description": "…"}`
+(the description only where it says more than the code):
+
+| `error` | Status | When |
+| --- | --- | --- |
+| `invalid_request` | 400 | `grant_type` or a parameter the grant needs is missing or malformed, or a parameter is sent twice |
+| `unsupported_grant_type` | 400 | a grant other than the three above |
+| `invalid_grant` | 400 | a code or refresh token refused for any reason, or the person behind it offboarded or keyless |
+| `invalid_client` | 401 | an unknown or disabled app, or a bot's wrong secret |
+
+Every answer from `/token` carries `Cache-Control: no-store` (RFC 6749 §5.1).
+
+#### Estiva's JSON format
+
 ```json
 { "grantType": "authorization_code", "code": "…", "clientId": "…",
   "redirectUri": "…", "codeVerifier": "…" }
@@ -685,7 +721,12 @@ or, as a role identity's custodian:
 { "grantType": "client_credentials", "clientId": "…", "clientSecret": "…" }
 ```
 
-All three return the same body. **Every `client_credentials` refusal is
+Its refusals keep this service's own error shape (`{"error": {"code": …}}`),
+with the same reasons as the table above.
+
+#### Both formats
+
+Every grant returns the same body. **Every `client_credentials` refusal is
 `invalid_client`**, whether the client is unknown, the secret is wrong, the
 client is public, or the identity has been offboarded — telling them apart would
 make this endpoint an oracle for enumerating credentials. Which it was is in the
@@ -709,9 +750,12 @@ caller with no use for it is pure downside.
 
 ### `refresh_token`
 
-```json
-{ "grantType": "refresh_token", "refreshToken": "…", "clientId": "estiva-peek" }
 ```
+grant_type=refresh_token&refresh_token=…&client_id=estiva-peek
+```
+
+or `{ "grantType": "refresh_token", "refreshToken": "…", "clientId": "estiva-peek" }`
+in the JSON format.
 
 A refresh token is the most dangerous thing this service gives a public client:
 long-lived, and stored where nothing can keep a secret. Three properties are
@@ -720,8 +764,20 @@ what make that acceptable, and all three are load-bearing.
 **It rotates.** Every redemption returns a new token and spends the old one, so
 a stolen copy stops working the moment the real app refreshes.
 
-**A replay burns the chain.** Presenting an already-spent token is not a retry —
-it means two parties hold the same credential. There is no way to tell the thief
+**A retry within 30 seconds gets the same answer.** A renewal whose answer was
+lost — the laptop slept, the Wi-Fi dropped, two tabs renewed at once — leaves
+the app holding only the spent token. Presented again by the same app within 30
+seconds of its spend, while the new token it bought is still unused, it returns
+that same new token (and a fresh access token), so the app stays signed in and
+the chain still has one live token (Miky, 2026-10-16; RFC 9700 §4.14.2). Only
+hashes are stored, so the spent row keeps its successor sealed under a key
+derived from the spent token itself: the database alone cannot open it. It is
+cleared once the 30 seconds are past (`migrations/013_refresh_retry.sql`). The
+audit records the retry as `retried: true`.
+
+**Any other replay burns the chain.** Presenting a spent token after those 30
+seconds, after its successor was used, or from another app, is not a retry — it
+means two parties hold the same credential. There is no way to tell the thief
 from the victim, so *every* token in the lineage is revoked, including the
 newest, and both are signed out. Without this, rotation is bookkeeping. It is
 audited as `outcome: error` rather than `refused`, so it is greppable as the
@@ -732,8 +788,9 @@ app and the person's status. So `/logout` and offboarding end refresh
 immediately, rather than leaving a credential that quietly renews a session
 somebody thought they had ended.
 
-Every refusal is `invalid_grant`, with the reason in `audit_events` — same
-posture as the code grant, and for the same reason.
+Every refusal of the token is `invalid_grant`, with the reason in
+`audit_events` — same posture as the code grant, and for the same reason. A
+disabled app is `invalid_client`.
 
 Claims: `iss` = issuer origin, `sub` = **the user's pubkey**, `aud` = the app's
 `client_id`. RS256, not ES256. The reason was Peek's Convex backend, which

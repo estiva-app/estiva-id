@@ -65,8 +65,22 @@ describe('discovery', () => {
     expect(doc).toMatchObject({
       issuer: cfg.ISSUER_URL,
       jwks_uri: `${cfg.ISSUER_URL}/.well-known/jwks.json`,
-      id_token_signing_alg_values_supported: ['RS256'],
     })
+  })
+
+  /**
+   * What a standard OAuth library configures itself from: how a public client
+   * authenticates at `/token`, and which `prompt` it may send. An ID token's
+   * algorithm is not advertised, because no ID token is issued.
+   */
+  it('advertises how a client authenticates and which prompt it may send, and no ID token', async () => {
+    const doc = (await (await app.request('/.well-known/openid-configuration')).json()) as Record<
+      string,
+      unknown
+    >
+    expect(doc.token_endpoint_auth_methods_supported).toEqual(['none', 'client_secret_post'])
+    expect(doc.prompt_values_supported).toEqual(['none'])
+    expect(doc).not.toHaveProperty('id_token_signing_alg_values_supported')
   })
 
   it('serves a public JWKS with no private material', async () => {

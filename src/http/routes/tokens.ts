@@ -50,7 +50,7 @@ import {
   touchSession,
 } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
-import { badRequest, forbidden, unauthenticated } from '../../errors.js'
+import { AppError, badRequest, forbidden, unauthenticated } from '../../errors.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
@@ -90,6 +90,82 @@ const refreshGrantSchema = z.object({
   refreshToken: z.string().min(1),
   clientId: z.string().min(1),
 })
+
+/**
+ * The RFC 6749 §5.2 error a refusal answers with, when the request came in the
+ * standard form format. The JSON format keeps this service's own error shape.
+ */
+type OAuthErrorCode =
+  | 'invalid_request'
+  | 'invalid_client'
+  | 'invalid_grant'
+  | 'unsupported_grant_type'
+
+/** A refusal that also names its RFC 6749 §5.2 error. */
+class TokenRefusal extends AppError {
+  constructor(
+    error: AppError,
+    readonly oauth: OAuthErrorCode,
+  ) {
+    super(error.code, error.message, error.detail)
+  }
+}
+
+const refused = (error: AppError, oauth: OAuthErrorCode) => new TokenRefusal(error, oauth)
+
+/*
+  The refusals every grant shares. An unknown or disabled app is
+  `invalid_client` (RFC 6749 §5.2: "unknown client"). An offboarded person, or
+  one with no key, is `invalid_grant`: the grant they gave has been revoked.
+*/
+const appRefused = () => refused(forbidden('Unknown or disabled app'), 'invalid_client')
+const personRefused = () => refused(forbidden('That identity is no longer active'), 'invalid_grant')
+const noKey = () => refused(forbidden('No active key for this identity'), 'invalid_grant')
+const grantRefused = () => refused(badRequest('invalid_grant'), 'invalid_grant')
+
+/** The form's parameter names (RFC 6749 §4.1.3, §4.4.2, §6; RFC 7636 §4.5), and ours. */
+const FORM_FIELDS = {
+  grant_type: 'grantType',
+  code: 'code',
+  redirect_uri: 'redirectUri',
+  code_verifier: 'codeVerifier',
+  refresh_token: 'refreshToken',
+  client_id: 'clientId',
+  client_secret: 'clientSecret',
+} as const
+
+const FIELD_NAMES = Object.fromEntries(
+  Object.entries(FORM_FIELDS).map(([form, ours]) => [ours, form]),
+) as Record<string, string>
+
+/**
+ * Read an `application/x-www-form-urlencoded` body into the grant schemas'
+ * names. A parameter with no value counts as absent and one sent twice is
+ * refused (RFC 6749 §3.1); parameters this service does not use, such as
+ * `scope`, are ignored.
+ */
+async function readForm(c: Context<AppEnv>): Promise<Record<string, string>> {
+  const body: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const [name, value] of new URLSearchParams(await c.req.text())) {
+    if (seen.has(name))
+      throw refused(badRequest(`${name} is sent more than once`), 'invalid_request')
+    seen.add(name)
+    const ours = FORM_FIELDS[name as keyof typeof FORM_FIELDS]
+    if (ours && value !== '') body[ours] = value
+  }
+  return body
+}
+
+/** A form request's answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
+function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErrorCode) {
+  c.get('log')?.warn({ code: error.code, oauth, detail: error.detail }, error.message)
+  const description = error.message === oauth ? undefined : error.message
+  return c.json(
+    { error: oauth, ...(description ? { error_description: description } : {}) },
+    oauth === 'invalid_client' ? 401 : 400,
+  )
+}
 
 /**
  * The token body every grant returns.
@@ -190,6 +266,30 @@ export function tokenRoutes(): Hono<AppEnv> {
     // Sets the header when the origin is registered; a same-origin request has
     // no Origin header and needs none.
     await allowOrigin(c)
+    // RFC 6749 §5.1: an answer holding a token is never cached.
+    c.header('cache-control', 'no-store')
+    c.header('pragma', 'no-cache')
+
+    /*
+      The standard format (record sign-in-is-plain-oauth): what any OAuth
+      library sends, answered with RFC 6749 §5.2 errors. It never falls through
+      to the cookie grant below, which no standard client knows.
+      why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md
+    */
+    const mediaType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
+    if (mediaType === 'application/x-www-form-urlencoded') {
+      try {
+        return await formGrant(c)
+      } catch (error) {
+        if (error instanceof TokenRefusal) return oauthErrorResponse(c, error, error.oauth)
+        if (error instanceof AppError && error.status === 400) {
+          return oauthErrorResponse(c, error, 'invalid_request')
+        }
+        throw error
+      }
+    }
+
+    // Estiva's own JSON format, until Peek, Ship and Leaf have moved off it.
     const body: unknown = await c.req.json().catch(() => null)
 
     const codeGrant = codeGrantSchema.safeParse(body)
@@ -237,7 +337,7 @@ export function tokenRoutes(): Hono<AppEnv> {
     // Tokens are audience-bound, so an unknown or disabled app must not get one
     // — otherwise /sign would be deciding policy for an app that does not exist.
     const app = await findAppPolicy(parsed.data.clientId)
-    if (!app || app.status !== 'active') throw forbidden('Unknown or disabled app')
+    if (!app || app.status !== 'active') throw appRefused()
 
     // Sessions outlive an offboarding unless something revokes them, and a
     // session is all `/token` needs. Checking the person here is what stops a
@@ -253,11 +353,11 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: user ? `user_${user.status}` : 'user_missing' },
         requestId: c.get('requestId'),
       })
-      throw forbidden('That identity is no longer active')
+      throw personRefused()
     }
 
     const pubkey = await getActivePubkey(userId)
-    if (!pubkey) throw forbidden('No active key for this identity')
+    if (!pubkey) throw noKey()
 
     const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
 
@@ -274,6 +374,46 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     return c.json(tokenResponse(issued, app.allowedKinds))
   })
+
+  /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
+  async function formGrant(c: Context<AppEnv>) {
+    const body = await readForm(c)
+    const grant = body.grantType
+    const invalid = (failure: z.ZodError) => {
+      const issues = failure.issues.map((issue) => ({
+        path: issue.path.map((part) => FIELD_NAMES[String(part)] ?? String(part)).join('.'),
+        message: issue.message,
+      }))
+      const names = [...new Set(issues.map((issue) => issue.path))].join(', ')
+      return refused(
+        badRequest(`Invalid ${grant} request: ${names}`, { issues }),
+        'invalid_request',
+      )
+    }
+
+    switch (grant) {
+      case undefined:
+        throw refused(badRequest('grant_type is required'), 'invalid_request')
+      case 'authorization_code': {
+        const parsed = codeGrantSchema.safeParse(body)
+        if (!parsed.success) throw invalid(parsed.error)
+        return exchangeAuthorizationCode(c, parsed.data)
+      }
+      case 'refresh_token': {
+        const parsed = refreshGrantSchema.safeParse(body)
+        if (!parsed.success) throw invalid(parsed.error)
+        return exchangeRefreshToken(c, parsed.data)
+      }
+      case 'client_credentials': {
+        // `client_secret_post` (RFC 6749 §2.3.1), as discovery advertises.
+        const parsed = serviceGrantSchema.safeParse(body)
+        if (!parsed.success) throw invalid(parsed.error)
+        return exchangeClientCredentials(c, parsed.data)
+      }
+      default:
+        throw refused(badRequest(`grant_type ${grant} is not supported`), 'unsupported_grant_type')
+    }
+  }
 
   /**
    * `grant_type=authorization_code` — the cross-origin path (PEEK-90).
@@ -310,14 +450,14 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: redemption.reason },
         requestId: c.get('requestId'),
       })
-      throw badRequest('invalid_grant')
+      throw grantRefused()
     }
 
     // The app was checked when the code was issued, but a code outlives that
     // check by up to a minute — long enough for an app to be disabled between
     // the two halves of the flow.
     const app = await findAppPolicy(redemption.clientId)
-    if (!app || app.status !== 'active') throw forbidden('Unknown or disabled app')
+    if (!app || app.status !== 'active') throw appRefused()
 
     // Same reason the session grant checks: offboarding must take effect within
     // the JWT TTL, and a code issued a minute ago is not evidence of anything.
@@ -332,11 +472,11 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: user ? `user_${user.status}` : 'user_missing' },
         requestId: c.get('requestId'),
       })
-      throw forbidden('That identity is no longer active')
+      throw personRefused()
     }
 
     const pubkey = await getActivePubkey(redemption.userId)
-    if (!pubkey) throw forbidden('No active key for this identity')
+    if (!pubkey) throw noKey()
 
     /*
       Whether the session that approved this code was a bot's (PER-22). Looked
@@ -354,7 +494,7 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: 'delegation_ended', delegate: approving.delegate.clientId },
         requestId: c.get('requestId'),
       })
-      throw badRequest('invalid_grant')
+      throw grantRefused()
     }
     const delegate = approving ? tokenDelegate(approving) : undefined
 
@@ -428,7 +568,7 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: redemption.reason },
         requestId: c.get('requestId'),
       })
-      throw badRequest('invalid_grant')
+      throw grantRefused()
     }
 
     // Re-checked on every refresh, not just at sign-in. A refresh grant that
@@ -436,7 +576,7 @@ export function tokenRoutes(): Hono<AppEnv> {
     // minting tokens for as long as the session lasts, which is exactly the
     // hole a long-lived credential is expected to close rather than open.
     const app = await findAppPolicy(input.clientId)
-    if (!app || app.status !== 'active') throw forbidden('Unknown or disabled app')
+    if (!app || app.status !== 'active') throw appRefused()
 
     const user = await findUserById(redemption.userId)
     if (!user || user.status !== 'active') {
@@ -449,16 +589,16 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: user ? `user_${user.status}` : 'user_missing' },
         requestId: c.get('requestId'),
       })
-      throw forbidden('That identity is no longer active')
+      throw personRefused()
     }
 
     const pubkey = await getActivePubkey(redemption.userId)
-    if (!pubkey) throw forbidden('No active key for this identity')
+    if (!pubkey) throw noKey()
 
     // `redeemRefreshToken` checked the session a moment ago; checked again,
     // because a delegation revoked in between must not refresh without `act`.
     const session = await findSessionById(redemption.sessionId)
-    if (session?.delegate && !session.live) throw badRequest('invalid_grant')
+    if (session?.delegate && !session.live) throw grantRefused()
     const delegate = session ? tokenDelegate(session) : undefined
 
     // Accepted: the renewal is a use, and the sign-in's 7-day idle end moves forward.
@@ -472,7 +612,12 @@ export function tokenRoutes(): Hono<AppEnv> {
       action: 'token.refresh',
       outcome: 'success',
       subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn, ...delegateDetail(delegate) },
+      detail: {
+        expiresIn: issued.expiresIn,
+        // A retry within 30 s, answered with the successor it already had.
+        ...(redemption.retried ? { retried: true } : {}),
+        ...delegateDetail(delegate),
+      },
       requestId: c.get('requestId'),
     })
 
@@ -512,10 +657,12 @@ export function tokenRoutes(): Hono<AppEnv> {
         detail: { reason: 'invalid_client', grant: 'client_credentials' },
         requestId: c.get('requestId'),
       })
-      throw unauthenticated('invalid_client')
+      throw refused(unauthenticated('invalid_client'), 'invalid_client')
     }
 
-    if (!credential.pubkey) throw forbidden('No active key for this identity')
+    if (!credential.pubkey) {
+      throw refused(forbidden('No active key for this identity'), 'invalid_client')
+    }
 
     const issued = await issueToken({ pubkey: credential.pubkey, clientId: credential.clientId })
 

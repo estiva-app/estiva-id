@@ -236,11 +236,13 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
 /**
  * OIDC discovery document.
  *
- * Still not a general-purpose OpenID Provider — no refresh tokens, no id_token,
- * no userinfo. It advertises what a relying party needs to find and trust the
- * JWKS (which is what `convex/auth.config.ts` resolves from `domain`), plus the
- * authorization code flow added in PEEK-90 so a browser app on another origin
- * can obtain a token at all.
+ * Plain OAuth 2.0, not a general-purpose OpenID Provider: no `id_token` and no
+ * userinfo, since who signed in is the access token's `sub` and the token
+ * response's `pubkey`. It advertises what a relying party needs to find and
+ * trust the JWKS (which is what `convex/auth.config.ts` resolves from
+ * `domain`), and what a standard OAuth library needs to sign in with a code and
+ * PKCE and renew with a refresh token (SPEC §4.4).
+ * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md
  */
 export function discoveryDocument(): Record<string, unknown> {
   const issuer = config().ISSUER_URL
@@ -266,8 +268,14 @@ export function discoveryDocument(): Record<string, unknown> {
     // interceptor cannot replay, so advertising it would only invite a client
     // to choose it.
     code_challenge_methods_supported: ['S256'],
+    // `none` for the apps, public clients holding no secret; a bot's
+    // `client_credentials` request sends its secret in the body.
+    token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
+    // Only `none`, the session probe an app boots on (`/authorize`).
+    prompt_values_supported: ['none'],
     subject_types_supported: ['public'],
-    id_token_signing_alg_values_supported: [ALG],
+    // No `id_token_signing_alg_values_supported`: no ID token is issued. The
+    // access token's algorithm is the JWKS key's `alg`, matched by `kid`.
     claims_supported: ['sub', 'aud', 'iss', 'exp', 'iat', 'act', 'sid'],
   }
 }
