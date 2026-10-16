@@ -151,10 +151,42 @@ async function readForm(c: Context<AppEnv>): Promise<Record<string, string>> {
     if (seen.has(name))
       throw refused(badRequest(`${name} is sent more than once`), 'invalid_request')
     seen.add(name)
-    const ours = FORM_FIELDS[name as keyof typeof FORM_FIELDS]
-    if (ours && value !== '') body[ours] = value
+    if (!Object.hasOwn(FORM_FIELDS, name) || value === '') continue
+    body[FORM_FIELDS[name as keyof typeof FORM_FIELDS]] = value
   }
   return body
+}
+
+/**
+ * `client_secret_basic` (RFC 6749 §2.3.1, which a server MUST support): the
+ * client's id and secret, each form-urlencoded, in an `Authorization: Basic`
+ * header. Moved into the body's names; a client using two methods at once is
+ * refused (§2.3).
+ */
+function readBasicAuth(c: Context<AppEnv>, body: Record<string, string>): void {
+  const header = c.req.header('authorization')
+  if (!header) return
+  const [scheme, encoded] = header.split(' ')
+  const decoded =
+    scheme?.toLowerCase() === 'basic' && encoded
+      ? Buffer.from(encoded, 'base64').toString('utf8')
+      : ''
+  const colon = decoded.indexOf(':')
+  if (colon < 1) throw refused(unauthenticated('Malformed client authentication'), 'invalid_client')
+  const decode = (part: string) => decodeURIComponent(part.replace(/\+/g, ' '))
+  let clientId: string
+  let clientSecret: string
+  try {
+    clientId = decode(decoded.slice(0, colon))
+    clientSecret = decode(decoded.slice(colon + 1))
+  } catch {
+    throw refused(unauthenticated('Malformed client authentication'), 'invalid_client')
+  }
+  if (body.clientSecret || (body.clientId && body.clientId !== clientId)) {
+    throw refused(badRequest('Use one client authentication method'), 'invalid_request')
+  }
+  body.clientId = clientId
+  body.clientSecret = clientSecret
 }
 
 /** A form request's answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
@@ -378,6 +410,7 @@ export function tokenRoutes(): Hono<AppEnv> {
   /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
   async function formGrant(c: Context<AppEnv>) {
     const body = await readForm(c)
+    readBasicAuth(c, body)
     const grant = body.grantType
     const invalid = (failure: z.ZodError) => {
       const issues = failure.issues.map((issue) => ({
@@ -405,7 +438,7 @@ export function tokenRoutes(): Hono<AppEnv> {
         return exchangeRefreshToken(c, parsed.data)
       }
       case 'client_credentials': {
-        // `client_secret_post` (RFC 6749 §2.3.1), as discovery advertises.
+        // The secret in the body or in HTTP Basic (RFC 6749 §2.3.1).
         const parsed = serviceGrantSchema.safeParse(body)
         if (!parsed.success) throw invalid(parsed.error)
         return exchangeClientCredentials(c, parsed.data)

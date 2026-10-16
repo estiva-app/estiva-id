@@ -78,7 +78,11 @@ describe('discovery', () => {
       string,
       unknown
     >
-    expect(doc.token_endpoint_auth_methods_supported).toEqual(['none', 'client_secret_post'])
+    expect(doc.token_endpoint_auth_methods_supported).toEqual([
+      'none',
+      'client_secret_basic',
+      'client_secret_post',
+    ])
     expect(doc.prompt_values_supported).toEqual(['none'])
     expect(doc).not.toHaveProperty('id_token_signing_alg_values_supported')
   })

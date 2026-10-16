@@ -101,17 +101,30 @@ export async function redeemRefreshToken(input: {
   refreshToken: string
   clientId: string
 }): Promise<RefreshRedemption> {
+  /*
+    Sealed successors past their window are of no use to anyone; clearing
+    them here keeps each one only until the next renewal anyone makes. Its own
+    statement, outside the renewal's transaction, so it holds no other chain's
+    rows while that transaction waits; `skip locked`: a row another renewal
+    holds is cleared by the next one.
+  */
+  await query(
+    `update refresh_tokens set successor_sealed = null
+      where id in (select id from refresh_tokens
+                    where successor_sealed is not null
+                      and used_at <= now() - make_interval(secs => $1)
+                      for update skip locked)`,
+    [RETRY_SECONDS],
+  )
+
   return withTransaction(async (client) => {
-    // Sealed successors past their window are of no use to anyone; clearing
-    // them here keeps each one only until the next renewal anyone makes.
-    // `skip locked`: a row another renewal holds is cleared by the next one.
+    // One renewal per chain at a time. A retry locks two rows of a chain and a
+    // replay revokes all of them; without this the two could take those locks
+    // in opposite orders and deadlock, and someone would get a 500.
     await client.query(
-      `update refresh_tokens set successor_sealed = null
-        where id in (select id from refresh_tokens
-                      where successor_sealed is not null
-                        and used_at <= now() - make_interval(secs => $1)
-                        for update skip locked)`,
-      [RETRY_SECONDS],
+      `select pg_advisory_xact_lock(hashtextextended(family_id::text, 0))
+         from refresh_tokens where token_hash = $1`,
+      [sha256(input.refreshToken)],
     )
 
     const found = await client.query<{
@@ -144,9 +157,10 @@ export async function redeemRefreshToken(input: {
     /**
      * A spent token presented again within 30 seconds, while its successor is
      * unused, is a renewal whose answer was lost: the laptop slept, the Wi-Fi
-     * dropped, two tabs renewed at once. It gets the same successor it got the
+     * dropped. It gets the same successor it got the
      * first time, so the app stays signed in and the chain still has exactly
-     * one live token (Miky, 2026-10-16; RFC 9700 §4.14.2 allows this grace).
+     * one live token. The window is Estiva's own policy (Miky, 2026-10-16),
+     * on top of RFC 9700 §4.14.2's rotation and reuse detection.
      *
      * The successor is locked too, so it cannot be spent between this check
      * and the answer. Anything else — another app, a revoked chain, a spent
@@ -202,7 +216,7 @@ export async function redeemRefreshToken(input: {
     if (row.used) {
       await client.query(
         `update refresh_tokens set revoked_at = coalesce(revoked_at, now()), successor_sealed = null
-          where family_id = $1`,
+          where family_id = $1 and (revoked_at is null or successor_sealed is not null)`,
         [row.family_id],
       )
       return { ok: false, reason: 'reused', userId: row.user_id }

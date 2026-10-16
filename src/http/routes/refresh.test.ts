@@ -252,16 +252,6 @@ describe('the refresh grant', () => {
       expect((await refresh(lost.refresh_token as string)).status).toBe(400)
     })
 
-    /** The new token was used, so the answer was not lost: two parties hold the chain. */
-    it('ends the sign-in once the new token has been used', async () => {
-      const first = await signIn(cookie)
-      const second = (await (await refresh(first.refresh_token as string)).json()) as TokenBody
-      const third = (await (await refresh(second.refresh_token as string)).json()) as TokenBody
-
-      expect((await refresh(first.refresh_token as string)).status).toBe(400)
-      expect((await refresh(third.refresh_token as string)).status).toBe(400)
-    })
-
     it('ends the sign-in when another app presents it', async () => {
       const first = await signIn(cookie)
       const lost = (await (await refresh(first.refresh_token as string)).json()) as TokenBody

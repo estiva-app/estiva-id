@@ -684,7 +684,8 @@ grant_type=client_credentials&client_id=…&client_secret=…
 ```
 
 A public client (every app) sends only its `client_id`; a bot's
-`client_credentials` request sends its secret in the body (`client_secret_post`).
+`client_credentials` request sends its id and secret in HTTP Basic
+(`client_secret_basic`) or in the body (`client_secret_post`), never both.
 Discovery advertises both as `token_endpoint_auth_methods_supported`. A
 parameter with no value counts as absent, one sent twice is refused, and ones
 this service does not use (`scope`) are ignored. A form request never falls
@@ -765,11 +766,12 @@ what make that acceptable, and all three are load-bearing.
 a stolen copy stops working the moment the real app refreshes.
 
 **A retry within 30 seconds gets the same answer.** A renewal whose answer was
-lost — the laptop slept, the Wi-Fi dropped, two tabs renewed at once — leaves
+lost — the laptop slept, the Wi-Fi dropped — leaves
 the app holding only the spent token. Presented again by the same app within 30
 seconds of its spend, while the new token it bought is still unused, it returns
 that same new token (and a fresh access token), so the app stays signed in and
-the chain still has one live token (Miky, 2026-10-16; RFC 9700 §4.14.2). Only
+the chain still has one live token. The window is Estiva's own policy (Miky,
+2026-10-16), on top of RFC 9700 §4.14.2's rotation and reuse detection. Only
 hashes are stored, so the spent row keeps its successor sealed under a key
 derived from the spent token itself: the database alone cannot open it. It is
 cleared once the 30 seconds are past (`migrations/013_refresh_retry.sql`). The

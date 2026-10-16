@@ -269,8 +269,8 @@ export function discoveryDocument(): Record<string, unknown> {
     // to choose it.
     code_challenge_methods_supported: ['S256'],
     // `none` for the apps, public clients holding no secret; a bot's
-    // `client_credentials` request sends its secret in the body.
-    token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
+    // `client_credentials` request sends its secret in HTTP Basic or the body.
+    token_endpoint_auth_methods_supported: ['none', 'client_secret_basic', 'client_secret_post'],
     // Only `none`, the session probe an app boots on (`/authorize`).
     prompt_values_supported: ['none'],
     subject_types_supported: ['public'],

@@ -41,8 +41,11 @@ interface TokenBody {
 let ada: Awaited<ReturnType<typeof createUserWithKey>>
 let cookie: string
 
-/** The browser half, then the code redeemed in the form format. */
-async function signIn(): Promise<Response> {
+/**
+ * The browser half, then the code redeemed in the form format — with a
+ * different verifier than the one the challenge was made from, if given.
+ */
+async function signIn(presentedVerifier?: string): Promise<Response> {
   const verifier = randomBytes(32).toString('base64url')
   const challenge = createHash('sha256').update(verifier, 'utf8').digest('base64url')
   const params = new URLSearchParams({
@@ -58,7 +61,7 @@ async function signIn(): Promise<Response> {
     grant_type: 'authorization_code',
     code,
     redirect_uri: REDIRECT,
-    code_verifier: verifier,
+    code_verifier: presentedVerifier ?? verifier,
     client_id: CLIENT,
   })
 }
@@ -143,13 +146,7 @@ describe('a standard OAuth client', () => {
   })
 
   it('gets invalid_grant for a code with the wrong verifier', async () => {
-    const response = await form({
-      grant_type: 'authorization_code',
-      code: randomBytes(16).toString('base64url'),
-      redirect_uri: REDIRECT,
-      code_verifier: randomBytes(32).toString('base64url'),
-      client_id: CLIENT,
-    })
+    const response = await signIn(randomBytes(32).toString('base64url'))
     expect(response.status).toBe(400)
     expect(((await response.json()) as TokenBody).error).toBe('invalid_grant')
   })
@@ -221,5 +218,30 @@ describe('a bot in the form format', () => {
     })
     expect(wrong.status).toBe(401)
     expect(await wrong.json()).toEqual({ error: 'invalid_client' })
+  })
+
+  /** What most OAuth libraries send by default for a client holding a secret. */
+  it('signs in with its secret in HTTP Basic, and two methods at once are refused', async () => {
+    const bot = await createRoleIdentity({ displayName: 'Basic Bot' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'basic-bot',
+      name: 'Basic Bot',
+      allowedKinds: [9],
+    })
+    const basic = `Basic ${Buffer.from(
+      `${encodeURIComponent(credential.clientId)}:${encodeURIComponent(credential.secret)}`,
+    ).toString('base64')}`
+
+    const good = await form({ grant_type: 'client_credentials' }, { authorization: basic })
+    expect(good.status).toBe(200)
+    expect(((await good.json()) as TokenBody).pubkey).toBe(bot.pubkey)
+
+    const both = await form(
+      { grant_type: 'client_credentials', client_secret: credential.secret },
+      { authorization: basic },
+    )
+    expect(both.status).toBe(400)
+    expect(((await both.json()) as TokenBody).error).toBe('invalid_request')
   })
 })
