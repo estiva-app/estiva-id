@@ -78,6 +78,7 @@ import {
   createSession,
   revokeOtherSessions,
   revokeSession,
+  secondsUntil,
 } from '../../domain/sessions.js'
 import { createUserWithKey, findUserByEmail, findUserById } from '../../domain/users.js'
 import { badRequest, conflict, forbidden, notFound, unauthenticated } from '../../errors.js'
@@ -224,14 +225,18 @@ export function challengeFromClientData(clientDataJSON: string): string {
   return challenge
 }
 
-function setSessionCookie(c: Context<AppEnv>, token: string): void {
-  const cfg = config()
+/**
+ * The session cookie, set once at the tap to last until the session's 14-day
+ * end. It is never re-set to slide: renewals reach `/token` without it, so the
+ * idle end lives on the session row instead (see `SESSION_IDLE_SECONDS`).
+ */
+export function setSessionCookie(c: Context<AppEnv>, token: string, expiresAt: Date): void {
   setCookie(c, SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'Lax',
-    secure: cfg.NODE_ENV === 'production',
+    secure: config().NODE_ENV === 'production',
     path: '/',
-    maxAge: cfg.SESSION_TTL_SECONDS,
+    maxAge: secondsUntil(expiresAt),
   })
 }
 
@@ -359,7 +364,7 @@ export function authRoutes(): Hono<AppEnv> {
       }
     }
 
-    const [pubkey, { token }] = await Promise.all([
+    const [pubkey, { token, expiresAt }] = await Promise.all([
       getActivePubkey(claimed.userId),
       createSession({
         userId: claimed.userId,
@@ -455,7 +460,7 @@ export function authRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    setSessionCookie(c, token)
+    setSessionCookie(c, token, expiresAt)
     return c.json({ verified: true, pubkey })
   })
 
@@ -584,7 +589,7 @@ export function authRoutes(): Hono<AppEnv> {
     const passkeysRetired = await revokeAllCredentialsExcept(claimed.userId, credentialRowId)
     const consumed = await consumeRecoveryForUser(claimed.userId)
 
-    const [pubkey, { token }] = await Promise.all([
+    const [pubkey, { token, expiresAt }] = await Promise.all([
       getActivePubkey(claimed.userId),
       createSession({
         userId: claimed.userId,
@@ -615,7 +620,7 @@ export function authRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    setSessionCookie(c, token)
+    setSessionCookie(c, token, expiresAt)
     return c.json({ verified: true, pubkey, passkeysRetired })
   })
 
@@ -730,7 +735,7 @@ export function authRoutes(): Hono<AppEnv> {
     }
 
     await recordCredentialUse(stored.id, verification.authenticationInfo.newCounter)
-    const [pubkey, { token }] = await Promise.all([
+    const [pubkey, { token, expiresAt }] = await Promise.all([
       getActivePubkey(user.id),
       createSession({
         userId: user.id,
@@ -749,7 +754,7 @@ export function authRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    setSessionCookie(c, token)
+    setSessionCookie(c, token, expiresAt)
     return c.json({ verified: true, pubkey })
   })
 

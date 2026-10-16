@@ -143,9 +143,6 @@ anything else happens.
 * **Account switching.** One active identity is the only case. A shell that
   supported switching would need an account picker, which is the app-specific
   sign-in surface this contract exists to delete.
-* **Refresh.** There is no refresh grant (PEEK-108). An expired token costs a
-  round trip through this same flow, which is silent when the session is live.
-  That is the whole reason `JWT_TTL_SECONDS` is an hour rather than ten minutes.
 * **Sign-out UI.** Out of scope for entry. Clearing the app's stored token is
   not the same act as ending the Estiva ID session, and conflating them is its
   own ticket.

@@ -58,11 +58,36 @@ const schema = z.object({
   KEY_ENCRYPTION_KEK: hex32Bytes,
   KEY_ENCRYPTION_KID: z.string().min(1).default('deploy-1'),
 
-  SESSION_TTL_SECONDS: z.coerce
+  /**
+   * How long a person's sign-in can last at most, from the passkey tap.
+   *
+   * Fourteen days, Google Workspace's default (Miky, 2026-10-16). It is the
+   * cookie's Max-Age as well as the session row's `expires_at`, set once at the
+   * tap and never slid: a renewal is a cross-origin `fetch` to `/token` that
+   * carries no cookie, so nothing could move it forward anyway.
+   *
+   * Renamed from `SESSION_TTL_SECONDS` (12 h) so a deployment that still sets
+   * the old name does not quietly keep the old day.
+   */
+  SESSION_MAX_SECONDS: z.coerce
     .number()
     .int()
     .positive()
-    .default(60 * 60 * 12),
+    .default(60 * 60 * 24 * 14),
+
+  /**
+   * How long a person's sign-in survives unused (Miky, 2026-10-16).
+   *
+   * Seven days. "Used" is what this service can see: a renewal at `/token` or a
+   * visit to this origin with the cookie. Each moves the session's
+   * `idle_expires_at` forward; it lives on the row, not in the cookie, for the
+   * reason above. Delegated sessions have no idle end, only their 24 h.
+   */
+  SESSION_IDLE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24 * 7),
 
   /**
    * How long an access token lives.

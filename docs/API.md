@@ -19,6 +19,12 @@ Every error shares one shape, with a stable machine-readable `code`:
 Two authentication modes:
 
 * **Session cookie** (`estiva_id_session`) — for browsers on this origin.
+  A person's session ends 7 days after its last use or 14 days after the
+  passkey tap, whichever is first (`SESSION_IDLE_SECONDS`,
+  `SESSION_MAX_SECONDS`). A use is a request with the cookie or a renewal at
+  `/token`. The cookie is set once, at the tap, to the 14-day end: a renewal
+  never carries it, so the idle end lives on the session row. A bot's
+  delegated session keeps a fixed 24 hours and has no idle end.
 * **Bearer JWT** — for apps on other origins. This is what `/sign` takes.
 
 ---
@@ -947,6 +953,12 @@ The person-facing page is `/device?code=XXXX-XXXX`.
 `POST /auth/test-login { email, secret }` → the session cookie, plus
 `{ pubkey, session_token, cookie_name, expires_at }` for a harness with no
 cookie jar. The result is an **ordinary member session**, not a delegated one.
+
+- **A sign-in can start older.** `tapped_ago_seconds` and
+  `last_used_ago_seconds` (both optional, 0 to 60 days, a last use never before
+  the tap) start it as if the tap and its last use were that long ago, so a
+  check reaches the 7-day idle end and the 14-day end without waiting. The
+  cookie's Max-Age and `expires_at` are what is left of the 14 days.
 
 - **Only a test account can hold a secret, and the schema enforces it.**
   `test_credentials` references `users (id, test_account)` with a composite

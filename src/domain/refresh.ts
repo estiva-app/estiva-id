@@ -10,9 +10,14 @@
  * See `migrations/007_refresh_tokens.sql` for why each one is there.
  */
 import { createHash, randomBytes } from 'node:crypto'
+import { config } from '../config.js'
 import { query, withTransaction } from '../db/pool.js'
+import { liveSessionSql, touchSessionSql } from './sessions.js'
 
 const sha256 = (input: string) => createHash('sha256').update(input, 'utf8').digest()
+
+/** When a session ends if nothing uses it again: the earlier of its idle and absolute ends. */
+const sessionEndSql = 'least(expires_at, coalesce(idle_expires_at, expires_at))'
 
 export interface IssuedRefreshToken {
   refreshToken: string
@@ -31,12 +36,12 @@ export async function issueRefreshToken(input: {
   userId: string
   sessionId: string
 }): Promise<IssuedRefreshToken | null> {
-  const session = await query<{ expires_at: Date }>(
-    `select expires_at from sessions
-      where id = $1 and revoked_at is null and expires_at > now()`,
+  const session = await query<{ ends_at: Date }>(
+    `select ${sessionEndSql} as ends_at from sessions
+      where id = $1 and ${liveSessionSql()}`,
     [input.sessionId],
   )
-  const expiresAt = session.rows[0]?.expires_at
+  const expiresAt = session.rows[0]?.ends_at
   // No live session means nothing to justify a refresh token. Returning null
   // rather than throwing keeps this a decision the caller reports, not a 500.
   if (!expiresAt) return null
@@ -138,12 +143,18 @@ export async function redeemRefreshToken(input: {
      * signing out mean something (PEEK-122). Revoking the session ends refresh
      * immediately, without having to find and revoke rows in this table.
      */
-    const session = await client.query<{ expires_at: Date }>(
-      `select expires_at from sessions
-        where id = $1 and revoked_at is null and expires_at > now()`,
-      [row.session_id],
+    /*
+      A renewal is a use, so the session's idle end moves forward before the
+      new token is written, and the token ends when the session would if this
+      were its last use: the earlier of the two ends. The 14 days never move.
+    */
+    const session = await client.query<{ ends_at: Date }>(
+      `update sessions set ${touchSessionSql('$2')}
+        where id = $1 and ${liveSessionSql()}
+        returning ${sessionEndSql} as ends_at`,
+      [row.session_id, config().SESSION_IDLE_SECONDS],
     )
-    const sessionExpiresAt = session.rows[0]?.expires_at
+    const sessionExpiresAt = session.rows[0]?.ends_at
     if (!sessionExpiresAt) return { ok: false, reason: 'session_gone', userId: row.user_id }
 
     await client.query('update refresh_tokens set used_at = now() where id = $1', [row.id])
