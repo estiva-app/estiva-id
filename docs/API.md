@@ -880,6 +880,7 @@ Per-app rows in `app_credentials`:
 | --- | --- | --- |
 | Estiva Peek | `estiva-peek` | 9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851, 40003, 1852, 24242, 30840 |
 | Estiva Ship | `estiva-ship` | 30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242 |
+| Estiva Leaf | `estiva-leaf` | 27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7 |
 
 `src/db/seed.ts` is the source; this table is its copy and has lagged it before.
 

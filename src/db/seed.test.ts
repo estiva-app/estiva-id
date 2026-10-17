@@ -88,6 +88,16 @@ describe('seeded signing policies', () => {
     }
   })
 
+  it('lets every app that draws a comment react to it, and take the reaction back', () => {
+    // One reaction row in every app (COMM-4): a reaction made in one shows in
+    // the others, so losing 7 or 5 from any one of them leaves its row refused
+    // at /sign while the others still work.
+    for (const client of ['estiva-peek', 'estiva-ship', 'estiva-leaf']) {
+      expect(app(client).allowedKinds).toContain(7)
+      expect(app(client).allowedKinds).toContain(5)
+    }
+  })
+
   it('lets Peek sign the object kinds the apps it acts on declare creatable', () => {
     /*
       PRO-4 made object-creating actions renderable, so Peek draws Ship's
@@ -177,6 +187,8 @@ describe('seeded signing policies', () => {
     expect([...app('estiva-leaf').allowedKinds].sort((a, b) => a - b)).toEqual(
       [
         5,
+        // A reaction on a comment, as Peek and Ship write it (COMM-4).
+        7,
         SHIP.COMMENT,
         SHIP.CHANGE,
         BUZZ.FOLDER_COMMAND,
