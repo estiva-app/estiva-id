@@ -13,6 +13,7 @@ import { config } from '../../config.js'
 import { closePool, query, queryOne } from '../../db/pool.js'
 import { UnobservableAdmission, setAdmissionPort } from '../../domain/admission.js'
 import { createInvite } from '../../domain/invites.js'
+import { createOwnBot } from '../../domain/roles.js'
 import { createSession } from '../../domain/sessions.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { SoftwareAuthenticator } from '../../test/authenticator.js'
@@ -148,6 +149,40 @@ describe('a member more than 15 minutes after the tap', () => {
     expect(refused.status).toBe(403)
     expect(await reasonOf(refused)).toBe('reauth_required')
     expect(await liveSessionCount()).toBe(2)
+  })
+
+  it('cannot make a bot or get a new secret for one, and nothing changes', async () => {
+    const { cookie } = await register('ada@example.test')
+    const [user] = (await query<{ id: string }>('select id from users')).rows
+    const bot = await createOwnBot({ ownerUserId: user?.id as string, label: 'Helper' })
+    const secretHash = async () =>
+      (
+        await queryOne<{ h: Buffer }>(
+          'select client_secret_hash as h from app_credentials where acts_as_user_id = $1',
+          [bot.botUserId],
+        )
+      )?.h.toString('hex')
+    const before = await secretHash()
+    await tappedAgo(STALE)
+
+    const made = await call('POST', '/me/bots', cookie, { label: 'Another' })
+    expect(made.status).toBe(403)
+    expect(await reasonOf(made)).toBe('reauth_required')
+    const rotated = await call('POST', `/me/bots/${bot.botUserId}/secret`, cookie)
+    expect(rotated.status).toBe(403)
+    expect(await reasonOf(rotated)).toBe('reauth_required')
+
+    expect(
+      Number(
+        (
+          await queryOne<{ n: string }>(
+            'select count(*) as n from users where owner_user_id = $1',
+            [user?.id],
+          )
+        )?.n,
+      ),
+    ).toBe(1)
+    expect(await secretHash()).toBe(before)
   })
 
   it('still reads their own account without a tap', async () => {

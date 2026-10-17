@@ -58,7 +58,8 @@ Challenges are single-use and expire in 5 minutes.
 (`REAUTH_SECONDS`) after the session's last passkey tap, these answer `403`
 with `detail.reason = reauth_required` and change nothing:
 `/auth/credentials/options`, `DELETE /me/credentials/:id`,
-`/me/sessions/revoke-others`, `POST /invites`,
+`/me/sessions/revoke-others`, `POST /me/bots`, `/me/bots/:id/secret`,
+`POST /invites`,
 `/admin/people/:id/recovery`, `/admin/people/:id/role`,
 `POST /admin/role-identities`, `/admin/role-identities/:id/credential` and
 `PATCH /admin/credentials/:clientId/kinds`. Confirm with
