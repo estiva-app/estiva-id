@@ -50,8 +50,19 @@ export function onConfirmStep(listener: ConfirmListener): () => void {
  * The passkey assertion that moves this session's tap time. Any failure that
  * is not the service's own answer — a cancelled or timed-out sheet — becomes
  * one plain refusal, since nothing was changed either way.
+ *
+ * Requests refused together share one confirmation: the browser shows one
+ * passkey sheet at a time, so a second would fail as "Not confirmed".
  */
-async function confirmItIsYou(): Promise<void> {
+let confirming: Promise<void> | null = null
+function confirmItIsYou(): Promise<void> {
+  confirming ??= askForPasskey().finally(() => {
+    confirming = null
+  })
+  return confirming
+}
+
+async function askForPasskey(): Promise<void> {
   for (const listener of confirmListeners) listener(true)
   try {
     const options = await request<PublicKeyCredentialRequestOptionsJSON>('/auth/reauth/options', {
