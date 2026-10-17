@@ -177,6 +177,8 @@ describe('seeded signing policies', () => {
     expect([...app('estiva-leaf').allowedKinds].sort((a, b) => a - b)).toEqual(
       [
         5,
+        // A reaction on a comment, as Peek and Ship write it (COMM-4).
+        7,
         SHIP.COMMENT,
         SHIP.CHANGE,
         BUZZ.FOLDER_COMMAND,
