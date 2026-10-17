@@ -47,6 +47,7 @@ import {
   policyViolation,
 } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { requireRecentTap } from '../middleware/recent-tap.js'
 import { requireSession } from '../middleware/session.js'
 
 /**
@@ -153,8 +154,12 @@ export function profileRoutes(): Hono<AppEnv> {
    * The secret is returned **once** and stored only as a hash, exactly like the
    * admin path — this route is a different door to the same room, not a
    * different room.
+   *
+   * So it asks for the passkey past 15 minutes from the tap, as the admin path
+   * does: a secret leaving the account is what the re-check is for (AUT-2;
+   * Miky, 2026-10-17). So does a new secret, below.
    */
-  routes.post('/me/bots', requireSession, async (c) => {
+  routes.post('/me/bots', requireSession, requireRecentTap, async (c) => {
     const { userId } = c.get('session')
     const parsed = botSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) throw badRequest('Expected { label }')
@@ -288,7 +293,7 @@ export function profileRoutes(): Hono<AppEnv> {
    * stops working, which is the point when the reason for rotating is that
    * somebody else may have it.
    */
-  routes.post('/me/bots/:id/secret', requireSession, async (c) => {
+  routes.post('/me/bots/:id/secret', requireSession, requireRecentTap, async (c) => {
     const { userId } = c.get('session')
 
     let rotated: Awaited<ReturnType<typeof rotateBotSecret>>

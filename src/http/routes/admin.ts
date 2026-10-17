@@ -48,7 +48,7 @@ import {
 import { RoleChangeRefused, setUserRole } from '../../domain/users.js'
 import { badRequest, conflict, notFound } from '../../errors.js'
 import type { AppEnv } from '../app.js'
-import { adminOnly } from '../middleware/admin.js'
+import { adminGrant, adminOnly } from '../middleware/admin.js'
 
 const createRoleSchema = z.object({
   displayName: z.string().min(1).max(200),
@@ -406,7 +406,7 @@ export function adminRoutes(): Hono<AppEnv> {
    * matching revoke means a mis-click is permanent, and permanent mistakes are
    * how a console teaches people to avoid it.
    */
-  routes.post('/admin/people/:id/role', ...adminOnly, async (c) => {
+  routes.post('/admin/people/:id/role', ...adminGrant, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const target = c.req.param('id')
 
@@ -432,7 +432,7 @@ export function adminRoutes(): Hono<AppEnv> {
     }
   })
 
-  routes.post('/admin/people/:id/recovery', ...adminOnly, async (c) => {
+  routes.post('/admin/people/:id/recovery', ...adminGrant, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const target = c.req.param('id')
 
@@ -489,7 +489,7 @@ export function adminRoutes(): Hono<AppEnv> {
    * swallowed by it — the trap that served the audit *JSON* to a browser on
    * PEEK-69. Leaving `/admin/roles` unclaimed keeps it available as a screen.
    */
-  routes.post('/admin/role-identities', ...adminOnly, async (c) => {
+  routes.post('/admin/role-identities', ...adminGrant, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const body = createRoleSchema.safeParse(await c.req.json().catch(() => null))
     if (!body.success) throw badRequest('Expected { displayName }')
@@ -593,7 +593,7 @@ export function adminRoutes(): Hono<AppEnv> {
    *
    * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-agent-signs-for-an-app-only-by-an-admin-grant.md
    */
-  routes.patch('/admin/credentials/:clientId/kinds', ...adminOnly, async (c) => {
+  routes.patch('/admin/credentials/:clientId/kinds', ...adminGrant, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const body = kindsSchema.safeParse(await c.req.json().catch(() => null))
     if (!body.success) throw badRequest('Expected { allowedKinds }')
@@ -637,7 +637,7 @@ export function adminRoutes(): Hono<AppEnv> {
    * it rather than adding a second, so rotation leaves exactly one live secret
    * — two would be a state somebody has to reason about during an incident.
    */
-  routes.post('/admin/role-identities/:id/credential', ...adminOnly, async (c) => {
+  routes.post('/admin/role-identities/:id/credential', ...adminGrant, async (c) => {
     const { userId: actorUserId } = c.get('session')
     const body = credentialSchema.safeParse(await c.req.json().catch(() => null))
     if (!body.success) throw badRequest('Expected { clientId, name, allowedKinds }')

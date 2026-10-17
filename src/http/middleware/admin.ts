@@ -14,6 +14,7 @@ import type { MiddlewareHandler } from 'hono'
 import { findUserById } from '../../domain/users.js'
 import { forbidden } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { requireRecentTap } from './recent-tap.js'
 import { requireSession } from './session.js'
 
 /**
@@ -42,3 +43,11 @@ export const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
  * confirm the route exists to somebody with no session at all.
  */
 export const adminOnly = [requireSession, requireAdmin] as const
+
+/**
+ * An admin action that hands out access or a secret: an invite, a recovery
+ * link, a role, an agent identity or its credential, an agent's signing kinds.
+ * Past 15 minutes from the tap these ask for the passkey first (AUT-2; Miky,
+ * 2026-10-16). Offboarding, reinstating, admitting and renaming do not.
+ */
+export const adminGrant = [...adminOnly, requireRecentTap] as const

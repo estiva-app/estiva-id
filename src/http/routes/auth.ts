@@ -76,6 +76,7 @@ import { admitMember } from '../../domain/relay-membership.js'
 import {
   SESSION_COOKIE,
   createSession,
+  markReauthenticated,
   revokeOtherSessions,
   revokeSession,
   secondsUntil,
@@ -83,6 +84,7 @@ import {
 import { createUserWithKey, findUserByEmail, findUserById } from '../../domain/users.js'
 import { badRequest, conflict, forbidden, notFound, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { requireRecentTap } from '../middleware/recent-tap.js'
 import { requireAnySession, requireSession } from '../middleware/session.js'
 
 /**
@@ -777,7 +779,94 @@ export function authRoutes(): Hono<AppEnv> {
 
   // --- Adding a second passkey (requires an existing session) --------------
 
-  routes.post('/auth/credentials/options', requireSession, async (c) => {
+  // --- Confirming it is still you (AUT-2) -----------------------------------
+
+  /**
+   * A passkey assertion that moves the tap time of the session you are in.
+   *
+   * Not a sign-in: no new session, no cookie, and `expires_at` stays where the
+   * sign-in put it. Only your own passkeys are offered, and only one of them
+   * counts — someone else's passkey proves nothing about this session.
+   */
+  routes.post('/auth/reauth/options', requireSession, async (c) => {
+    const { userId } = c.get('session')
+    const credentials = await listActiveCredentials(userId)
+    const options = await generateAuthenticationOptions({
+      rpID: cfg.RP_ID,
+      userVerification: 'required',
+      allowCredentials: credentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
+    })
+    await storeChallenge({ challenge: options.challenge, ceremony: 'reauthentication', userId })
+    return c.json(options)
+  })
+
+  routes.post('/auth/reauth/verify', requireSession, async (c) => {
+    const session = c.get('session')
+    const response = (await c.req.json().catch(() => null)) as AuthenticationResponseJSON | null
+    if (!response?.response?.clientDataJSON) throw badRequest('Missing authentication response')
+
+    const challenge = challengeFromClientData(response.response.clientDataJSON)
+    const claimed = await consumeChallenge(challenge, 'reauthentication')
+    if (!claimed || claimed.userId !== session.userId) {
+      throw badRequest('Unknown, expired or already-used challenge')
+    }
+
+    const refuse = async (reason: string) => {
+      await recordAudit({
+        actorType: 'user',
+        actorUserId: session.userId,
+        action: 'session.reauthenticate',
+        outcome: 'refused',
+        detail: { reason },
+        requestId: c.get('requestId'),
+      })
+    }
+
+    const stored = await findActiveCredential(response.id)
+    if (!stored || stored.userId !== session.userId) {
+      await refuse('not_your_credential')
+      throw unauthenticated('That passkey is not one of yours')
+    }
+
+    const verification = await verifyAuthentication({
+      response,
+      expectedChallenge: challenge,
+      expectedOrigin: cfg.RP_ORIGINS,
+      expectedRPID: cfg.RP_ID,
+      credential: {
+        id: stored.credentialId,
+        publicKey: stored.publicKey,
+        counter: stored.signCount,
+        transports: stored.transports as never,
+      },
+    })
+    if (!verification.verified) {
+      await refuse('verification_failed')
+      throw unauthenticated('Authentication could not be verified')
+    }
+
+    await recordCredentialUse(stored.id, verification.authenticationInfo.newCounter)
+    if (!(await markReauthenticated(session.id)))
+      throw unauthenticated('Session expired or revoked')
+
+    await recordAudit({
+      actorType: 'user',
+      actorUserId: session.userId,
+      action: 'session.reauthenticate',
+      outcome: 'success',
+      detail: { credentialRowId: stored.id },
+      requestId: c.get('requestId'),
+    })
+    return c.json({ verified: true })
+  })
+
+  // Past 15 minutes from the tap, adding a passkey asks for the passkey first
+  // (AUT-2). Guarding the options is enough: `/auth/register/verify` redeems
+  // only a challenge issued here, for this user, within its five minutes.
+  routes.post('/auth/credentials/options', requireSession, requireRecentTap, async (c) => {
     const { userId } = c.get('session')
     const existing = await listActiveCredentials(userId)
     const user = await findUserById(userId)
@@ -837,7 +926,7 @@ export function authRoutes(): Hono<AppEnv> {
    * valid until it expires. Someone who has lost a laptop needs both, and only
    * this half is time-critical.
    */
-  routes.post('/me/sessions/revoke-others', requireSession, async (c) => {
+  routes.post('/me/sessions/revoke-others', requireSession, requireRecentTap, async (c) => {
     const session = c.get('session')
     const revoked = await revokeOtherSessions(session.userId, session.id)
 
@@ -852,7 +941,7 @@ export function authRoutes(): Hono<AppEnv> {
     return c.json({ revoked })
   })
 
-  routes.delete('/me/credentials/:id', requireSession, async (c) => {
+  routes.delete('/me/credentials/:id', requireSession, requireRecentTap, async (c) => {
     const { userId } = c.get('session')
     const credentialRowId = c.req.param('id')
 

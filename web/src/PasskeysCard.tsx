@@ -13,6 +13,7 @@ import {
   type Credential,
   enrolCredentialOptions,
   listCredentials,
+  onConfirmStep,
   revokeCredential,
   revokeOtherSessions,
   verifyCredential,
@@ -37,8 +38,15 @@ export function PasskeysCard({ credentials, onChange }: Props) {
   async function enrol() {
     setBusy('enrol')
     setNotice(null)
+    // Past 15 minutes from the tap, a first sheet confirms it is you; say what
+    // the second one is for, or it reads as the same question twice (AUT-2).
+    let confirmed = false
+    const stopListening = onConfirmStep((asking) => {
+      if (asking) confirmed = true
+    })
     try {
-      const options = await enrolCredentialOptions()
+      const options = await enrolCredentialOptions().finally(stopListening)
+      if (confirmed) setNotice({ tone: 'warn', text: 'Confirmed. Now create the new passkey.' })
       const attestation = await startRegistration({ optionsJSON: options })
       await verifyCredential(attestation)
       onChange(await listCredentials())

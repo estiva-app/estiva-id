@@ -49,8 +49,21 @@ Two authentication modes:
 | `GET` | `/me` | Session | `{ id, email, displayName, status, role, pubkey }`. |
 | `GET` | `/me/credentials` | Session | Summaries only — no public keys, no raw credential ids. |
 | `DELETE` | `/me/credentials/:id` | Session | `404` if not yours. `409` if it is your only passkey. |
+| `POST` | `/auth/reauth/options` | Session | Confirm it is still you: an assertion offered only your own passkeys. |
+| `POST` | `/auth/reauth/verify` | Session | Body is the WebAuthn assertion. Moves this session's tap time; no new session, and its 14-day end stays. `401` for a passkey that is not yours. |
 
 Challenges are single-use and expire in 5 minutes.
+
+**Changing the account needs a recent tap** (AUT-2). More than 15 minutes
+(`REAUTH_SECONDS`) after the session's last passkey tap, these answer `403`
+with `detail.reason = reauth_required` and change nothing:
+`/auth/credentials/options`, `DELETE /me/credentials/:id`,
+`/me/sessions/revoke-others`, `POST /me/bots`, `/me/bots/:id/secret`,
+`POST /invites`,
+`/admin/people/:id/recovery`, `/admin/people/:id/role`,
+`POST /admin/role-identities`, `/admin/role-identities/:id/credential` and
+`PATCH /admin/credentials/:clientId/kinds`. Confirm with
+`/auth/reauth/options` → `/auth/reauth/verify`, then retry.
 
 ## Invites
 

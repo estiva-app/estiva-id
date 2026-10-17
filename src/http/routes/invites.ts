@@ -31,7 +31,7 @@ import {
 import { findUserByEmail } from '../../domain/users.js'
 import { badRequest, conflict } from '../../errors.js'
 import type { AppEnv } from '../app.js'
-import { adminOnly } from '../middleware/admin.js'
+import { adminGrant, adminOnly } from '../middleware/admin.js'
 
 const createSchema = z.object({
   email: z.string().email(),
@@ -49,7 +49,7 @@ const createSchema = z.object({
 export function inviteRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
-  routes.post('/invites', ...adminOnly, async (c) => {
+  routes.post('/invites', ...adminGrant, async (c) => {
     const { userId } = c.get('session')
 
     const parsed = createSchema.safeParse(await c.req.json().catch(() => null))

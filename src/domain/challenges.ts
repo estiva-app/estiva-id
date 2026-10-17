@@ -21,8 +21,17 @@ const TTL_SECONDS = 300
  *
  * `delegation` is the same argument for approving a bot's request (PER-22): an
  * approval assertion must not open a session, and a sign-in must not approve.
+ *
+ * `reauthentication` again (AUT-2): confirming it is still you moves the tap
+ * time of the session you are in, and must neither open one nor be satisfied
+ * by a sign-in's challenge.
  */
-export type Ceremony = 'registration' | 'authentication' | 'recovery' | 'delegation'
+export type Ceremony =
+  | 'registration'
+  | 'authentication'
+  | 'recovery'
+  | 'delegation'
+  | 'reauthentication'
 
 export async function storeChallenge(input: {
   challenge: string

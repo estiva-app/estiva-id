@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AdminPeople, AdminPerson } from './AdminPeople'
 import { AuditLog } from './AuditLog'
 import { BotsCard } from './BotsCard'
+import { ConfirmNotice } from './ConfirmNotice'
 import { DelegationsCard } from './DelegationsCard'
 import { PasskeysCard } from './PasskeysCard'
 import { ProfileCard } from './ProfileCard'
@@ -236,6 +237,8 @@ export function App() {
           </div>
         </header>
 
+        <ConfirmNotice />
+
         {onAudit ? (
           <>
             <p className="card-note">
@@ -267,6 +270,8 @@ export function App() {
           {signOut}
         </div>
       </header>
+
+      <ConfirmNotice />
 
       {/*
         An invite link opened by somebody who is already signed in.
