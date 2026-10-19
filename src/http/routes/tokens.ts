@@ -51,7 +51,6 @@ import {
 } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { AppError, badRequest, forbidden, unauthenticated } from '../../errors.js'
-import { logger } from '../../logger.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
@@ -414,17 +413,16 @@ export function tokenRoutes(): Hono<AppEnv> {
    * Never the secret, the code or a token. Goes with the JSON branch.
    */
   function logJsonFormat(c: Context<AppEnv>, body: unknown) {
-    const fields =
-      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
+    const isObject = typeof body === 'object' && body !== null && !Array.isArray(body)
+    const fields = isObject ? (body as Record<string, unknown>) : {}
     const named = (key: string) =>
       typeof fields[key] === 'string' ? (fields[key] as string).slice(0, 64) : undefined
-    logger.warn(
+    c.get('log').warn(
       {
         clientId: named('clientId') ?? null,
-        grant: named('grantType') ?? (body === null ? 'unparsable' : 'session_cookie'),
-        origin: c.req.header('origin') ?? null,
+        grant: named('grantType') ?? (isObject ? 'session_cookie' : 'not_an_object'),
+        origin: c.req.header('origin')?.slice(0, 200) ?? null,
         userAgent: c.req.header('user-agent')?.slice(0, 120) ?? null,
-        requestId: c.get('requestId'),
       },
       'token request in the JSON format',
     )
