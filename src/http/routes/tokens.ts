@@ -51,6 +51,7 @@ import {
 } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { AppError, badRequest, forbidden, unauthenticated } from '../../errors.js'
+import { logger } from '../../logger.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
@@ -325,12 +326,12 @@ export function tokenRoutes(): Hono<AppEnv> {
     const body: unknown = await c.req.json().catch(() => null)
 
     const codeGrant = codeGrantSchema.safeParse(body)
-    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
-
     const serviceGrant = serviceGrantSchema.safeParse(body)
-    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
-
     const refreshGrant = refreshGrantSchema.safeParse(body)
+    logJsonFormat(c, body)
+
+    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
+    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
     if (refreshGrant.success) return exchangeRefreshToken(c, refreshGrant.data)
 
     // Not any of the explicit grants. If it *looked* like one, say so rather
@@ -406,6 +407,28 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     return c.json(tokenResponse(issued, app.allowedKinds))
   })
+
+  /**
+   * One line per JSON-format request, so its removal can wait until nobody
+   * sends it (AUT-5): the client and grant it named, and where it came from.
+   * Never the secret, the code or a token. Goes with the JSON branch.
+   */
+  function logJsonFormat(c: Context<AppEnv>, body: unknown) {
+    const fields =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
+    const named = (key: string) =>
+      typeof fields[key] === 'string' ? (fields[key] as string).slice(0, 64) : undefined
+    logger.warn(
+      {
+        clientId: named('clientId') ?? null,
+        grant: named('grantType') ?? (body === null ? 'unparsable' : 'session_cookie'),
+        origin: c.req.header('origin') ?? null,
+        userAgent: c.req.header('user-agent')?.slice(0, 120) ?? null,
+        requestId: c.get('requestId'),
+      },
+      'token request in the JSON format',
+    )
+  }
 
   /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
   async function formGrant(c: Context<AppEnv>) {
