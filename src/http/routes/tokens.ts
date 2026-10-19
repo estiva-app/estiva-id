@@ -5,14 +5,16 @@
  *     — what a relying party resolves. `convex/auth.config.ts` takes a `domain`
  *     plus an `applicationID` and finds JWKS from discovery, the same way a
  *     Clerk or Auth0 integration does.
- *   * `POST /token` — the browser-side handoff, in its minimal form: exchange a
- *     session on this origin for a short-lived JWT scoped to one app.
+ *   * `POST /token` — a short-lived JWT scoped to one app, in the standard
+ *     OAuth format only: an `application/x-www-form-urlencoded` body with RFC
+ *     6749's parameter names, answered with §5.2 errors (record
+ *     sign-in-is-plain-oauth). `grant_type` selects the grant.
  *
- * **Two grants, and both are needed.**
+ * **Three grants.**
  *
- *   * `authorization_code` with PKCE (PEEK-90) — how an app on another origin
- *     gets a token. The session cookie is `SameSite=Lax`, so it is not sent on
- *     a cross-site `fetch` at all; relaxing that on the origin holding every
+ *   * `authorization_code` with PKCE (PEEK-90) — how a person's app gets a
+ *     token. The session cookie is `SameSite=Lax`, so it is not sent on a
+ *     cross-site `fetch` at all; relaxing that on the origin holding every
  *     custodied key is not worth it, so the redirect flow is the answer.
  *
  *     This endpoint *does* send CORS headers, and that is not a contradiction:
@@ -21,13 +23,11 @@
  *     response to a request it authenticated with a code and a PKCE verifier —
  *     credentials it already holds. Discovering that distinction cost one
  *     failed exchange; see the middleware below.
- *   * The original session grant — kept, because the account page is served
- *     from this very origin and making it round-trip through a redirect to talk
- *     to its own backend would be ceremony with no security to show for it.
+ *   * `refresh_token` (PEEK-108) — how that app renews without the person.
+ *   * `client_credentials` (PEEK-34) — how a role identity's server gets one.
  *
- * The body's shape selects the grant: `{ grantType: 'authorization_code', … }`
- * takes the new path, anything else takes the session path. That keeps the
- * existing callers working unchanged.
+ * A session cookie alone never buys a token: the cookie `{ clientId }` grant
+ * went with Estiva's own JSON format (AUT-5).
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
@@ -82,10 +82,7 @@ const refreshGrantSchema = z.object({
   clientId: z.string().min(1),
 })
 
-/**
- * The RFC 6749 §5.2 error a refusal answers with, when the request came in the
- * standard form format. The JSON format keeps this service's own error shape.
- */
+/** The RFC 6749 §5.2 error a refusal answers with. */
 type OAuthErrorCode =
   | 'invalid_request'
   | 'invalid_client'
@@ -180,7 +177,7 @@ function readBasicAuth(c: Context<AppEnv>, body: Record<string, string>): void {
   body.clientSecret = clientSecret
 }
 
-/** A form request's answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
+/** The answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
 function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErrorCode) {
   c.get('log')?.warn({ code: error.code, oauth, detail: error.detail }, error.message)
   const description = error.message === oauth ? undefined : error.message
@@ -194,9 +191,9 @@ function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErr
  * The token body every grant returns.
  *
  * `refresh_token` is present only where one was minted — the code and refresh
- * grants. The session grant is same-origin and the client-credentials grant has
- * a secret it can present again, so neither needs one, and issuing a long-lived
- * credential to a caller with no use for it is pure downside.
+ * grants. The client-credentials grant has a secret it can present again, so it
+ * needs none, and issuing a long-lived credential to a caller with no use for it
+ * is pure downside.
  *
  * ## `allowed_kinds`, and why it is here rather than nowhere
  *
@@ -272,18 +269,18 @@ export function tokenRoutes(): Hono<AppEnv> {
    * this the redirect completes, the code comes back, and the exchange dies at
    * the preflight — which is exactly what happened the first time Ship tried it.
    *
-   * The rules, and why the session grant stays same-origin-only regardless, are
-   * in `http/cors.ts`.
+   * The rules, and why the session cookie never rides along regardless, are in
+   * `http/cors.ts`.
    */
   routes.options('/token', preflight('POST, OPTIONS', 'content-type'))
 
   /**
-   * The grant is chosen by the body, not by a separate route, so relying
+   * The grant is chosen by `grant_type`, not by a separate route, so relying
    * parties have one token endpoint to configure — which is also what
    * discovery advertises.
    *
-   * `requireSession` cannot be middleware here: the code grant has no session
-   * by definition, and a cross-origin caller has no cookie to send.
+   * `requireSession` cannot be middleware here: no grant takes a session
+   * cookie, and a cross-origin caller has none to send.
    */
   routes.post('/token', async (c) => {
     // Sets the header when the origin is registered; a same-origin request has
@@ -402,8 +399,8 @@ export function tokenRoutes(): Hono<AppEnv> {
     const app = await findAppPolicy(redemption.clientId)
     if (!app || app.status !== 'active') throw appRefused()
 
-    // Same reason the session grant checks: offboarding must take effect within
-    // the JWT TTL, and a code issued a minute ago is not evidence of anything.
+    // Offboarding must take effect within the JWT TTL, and a code issued a
+    // minute ago is not evidence of anything.
     const user = await findUserById(redemption.userId)
     if (!user || user.status !== 'active') {
       await recordAudit({

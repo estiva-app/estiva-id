@@ -599,15 +599,14 @@ half offboarding closed — or that holds no key (`no_key`).
 
 ### Three grants, and why each exists
 
-**`authorization_code` with PKCE** is how an app on another origin gets a token.
+**`authorization_code` with PKCE** is how a person's app gets a token.
 It has to be a redirect flow: the session cookie is `SameSite=Lax` and this
-service serves no CORS, so a cross-origin `fetch` carrying credentials is
-blocked twice over. Neither is worth relaxing on the origin that holds every
-custodied signing key.
+service allows no credentialed CORS, so a cross-origin `fetch` carrying the
+cookie is blocked twice over. Neither is worth relaxing on the origin that holds
+every custodied signing key.
 
-**The session grant** stays because the account page is served from this very
-origin, and making it round-trip through a redirect to reach its own backend
-would be ceremony with nothing to show for it.
+**`refresh_token`** is how that app renews without asking the person again
+(below).
 
 **`client_credentials`** is how a **role identity** signs (PEEK-34). A bot has
 nobody to sign in, so before it existed a role could hold a custodied key it
@@ -681,13 +680,9 @@ third-party app is registered.
 
 ### `POST /token`
 
-Two request formats. **The standard one is the contract** (record
+One request format, the standard one (record
 [sign-in-is-plain-oauth](https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md),
-SPEC §4.4): what any OAuth 2.0 library sends. Estiva's own JSON format stays
-until Peek, Ship and Leaf have moved off it, and is then removed.
-
-#### The standard format
-
+SPEC §4.4): what any OAuth 2.0 library sends.
 `Content-Type: application/x-www-form-urlencoded`, with RFC 6749's names:
 
 ```
@@ -701,44 +696,20 @@ A public client (every app) sends only its `client_id`; a bot's
 (`client_secret_basic`) or in the body (`client_secret_post`), never both.
 Discovery advertises both as `token_endpoint_auth_methods_supported`. A
 parameter with no value counts as absent, one sent twice is refused, and ones
-this service does not use (`scope`) are ignored. A form request never falls
-back to the session-cookie grant below.
+this service does not use (`scope`) are ignored. A session cookie is never read
+here: a person's app gets a token only through `/authorize` and the code.
 
 A refusal is RFC 6749 §5.2's shape, `{"error": "…", "error_description": "…"}`
 (the description only where it says more than the code):
 
 | `error` | Status | When |
 | --- | --- | --- |
-| `invalid_request` | 400 | `grant_type` or a parameter the grant needs is missing or malformed, or a parameter is sent twice |
+| `invalid_request` | 400 | a body that is not form-encoded (Estiva's former JSON format included), `grant_type` or a parameter the grant needs missing or malformed, or a parameter sent twice |
 | `unsupported_grant_type` | 400 | a grant other than the three above |
 | `invalid_grant` | 400 | a code or refresh token refused for any reason, or the person behind it offboarded or keyless |
 | `invalid_client` | 401 | an unknown or disabled app, or a bot's wrong secret |
 
 Every answer from `/token` carries `Cache-Control: no-store` (RFC 6749 §5.1).
-
-#### Estiva's JSON format
-
-```json
-{ "grantType": "authorization_code", "code": "…", "clientId": "…",
-  "redirectUri": "…", "codeVerifier": "…" }
-```
-
-or, from this origin with a session cookie:
-
-```json
-{ "clientId": "estiva-peek" }
-```
-
-or, as a role identity's custodian:
-
-```json
-{ "grantType": "client_credentials", "clientId": "…", "clientSecret": "…" }
-```
-
-Its refusals keep this service's own error shape (`{"error": {"code": …}}`),
-with the same reasons as the table above.
-
-#### Both formats
 
 Every grant returns the same body. **Every `client_credentials` refusal is
 `invalid_client`**, whether the client is unknown, the secret is wrong, the
@@ -757,19 +728,15 @@ attempt**, successful or not: one that has been presented has been in the wild.
   "issuer": "…", "refresh_token": "…" }
 ```
 
-`refresh_token` comes back from the **code** and **refresh** grants only. The
-session grant is same-origin and `client_credentials` has a secret it can
-present again, so neither needs one, and handing a long-lived credential to a
-caller with no use for it is pure downside.
+`refresh_token` comes back from the **code** and **refresh** grants only.
+`client_credentials` has a secret it can present again, so it needs none, and
+handing a long-lived credential to a caller with no use for it is pure downside.
 
 ### `refresh_token`
 
 ```
 grant_type=refresh_token&refresh_token=…&client_id=estiva-peek
 ```
-
-or `{ "grantType": "refresh_token", "refreshToken": "…", "clientId": "estiva-peek" }`
-in the JSON format.
 
 A refresh token is the most dangerous thing this service gives a public client:
 long-lived, and stored where nothing can keep a secret. Three properties are

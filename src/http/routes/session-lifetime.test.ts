@@ -15,6 +15,7 @@ import { createSession } from '../../domain/sessions.js'
 import { createTestAccount } from '../../domain/test-accounts.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 import { resetTestLoginRateLimitForTests } from './test-login.js'
 
@@ -57,18 +58,18 @@ async function silentSignIn(
 /** Sign in silently and redeem the code, returning the first refresh token. */
 async function refreshTokenFor(cookie: string): Promise<string> {
   const { code, verifier } = await silentSignIn(cookie)
-  const response = await post('/token', {
-    grantType: 'authorization_code',
-    code,
-    clientId: CLIENT,
-    redirectUri: REDIRECT,
-    codeVerifier: verifier,
+  const response = await requestToken(app, {
+    grant_type: 'authorization_code',
+    code: code ?? '',
+    client_id: CLIENT,
+    redirect_uri: REDIRECT,
+    code_verifier: verifier,
   })
   return ((await response.json()) as { refresh_token: string }).refresh_token
 }
 
 const renew = (refreshToken: string) =>
-  post('/token', { grantType: 'refresh_token', refreshToken, clientId: CLIENT })
+  requestToken(app, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT })
 
 /** When the app's current refresh token expires: the one in the chain not yet spent. */
 async function newestRefreshExpiry(): Promise<Date> {
@@ -191,7 +192,7 @@ describe('a passkey sign-in', () => {
     // One day of idle left, and the app's renewals are now refused.
     await query("update sessions set idle_expires_at = now() + interval '1 day'")
     await query("update app_credentials set status = 'disabled' where client_id = $1", [CLIENT])
-    expect((await renew(first)).status).toBe(403)
+    expect((await renew(first)).status).toBe(401)
 
     // So the sign-in still ends on its own day: a silent sign-in after it asks for the passkey.
     await query("update app_credentials set status = 'active' where client_id = $1", [CLIENT])

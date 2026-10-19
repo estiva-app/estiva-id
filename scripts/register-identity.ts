@@ -17,6 +17,7 @@
  * `RP_ORIGINS`, or verification fails the way a real browser would.
  */
 import { SoftwareAuthenticator } from '../src/test/authenticator.js'
+import { signIn } from './sign-in.js'
 
 const ID_BASE = process.env.ID_BASE ?? 'http://localhost:8787'
 const RP_ID = process.env.RP_ID ?? 'localhost'
@@ -53,11 +54,7 @@ async function main(): Promise<void> {
   if (!setCookie) throw new Error('no session cookie returned')
   const cookie = setCookie.split(';')[0] as string
 
-  const tokenResponse = await post('/token', { clientId: CLIENT_ID }, cookie)
-  if (!tokenResponse.ok) {
-    throw new Error(`token ${tokenResponse.status}: ${await tokenResponse.text()}`)
-  }
-  const token = (await tokenResponse.json()) as { access_token: string; expires_in: number }
+  const token = await signIn(ID_BASE, cookie, CLIENT_ID)
 
   const result = {
     email: EMAIL,

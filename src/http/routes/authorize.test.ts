@@ -13,6 +13,7 @@ import { closePool, query } from '../../db/pool.js'
 import { createSession } from '../../domain/sessions.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 
 const app = createApp()
@@ -43,12 +44,7 @@ function authorizeUrl(overrides: Record<string, string> = {}, challenge = pkce()
 const authorize = (url: string, cookie?: string) =>
   app.request(url, { headers: cookie ? { cookie } : {} })
 
-const exchange = (body: Record<string, unknown>) =>
-  app.request('/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+const exchange = (params: Record<string, string>) => requestToken(app, params)
 
 async function auditFor(action: string) {
   const rows = await query<{ outcome: string; detail: Record<string, unknown> }>(
@@ -202,11 +198,11 @@ describe('the authorization_code grant', () => {
   }
 
   const validBody = (code: string, codeVerifier: string) => ({
-    grantType: 'authorization_code',
+    grant_type: 'authorization_code',
     code,
-    clientId: CLIENT,
-    redirectUri: REDIRECT,
-    codeVerifier,
+    client_id: CLIENT,
+    redirect_uri: REDIRECT,
+    code_verifier: codeVerifier,
   })
 
   it('exchanges a code for a token bound to the right pubkey', async () => {
@@ -255,14 +251,14 @@ describe('the authorization_code grant', () => {
     const { code, verifier } = await getCode()
     const response = await exchange({
       ...validBody(code, verifier),
-      redirectUri: 'https://ship.test/other',
+      redirect_uri: 'https://ship.test/other',
     })
     expect(response.status).toBe(400)
   })
 
   it('refuses a code redeemed by a different app', async () => {
     const { code, verifier } = await getCode()
-    const response = await exchange({ ...validBody(code, verifier), clientId: 'estiva-peek' })
+    const response = await exchange({ ...validBody(code, verifier), client_id: 'estiva-peek' })
     expect(response.status).toBe(400)
   })
 
@@ -288,7 +284,9 @@ describe('the authorization_code grant', () => {
     const { code, verifier } = await getCode()
     await query("update users set status = 'offboarded' where id = $1", [ada.id])
 
-    expect((await exchange(validBody(code, verifier))).status).toBe(403)
+    const response = await exchange(validBody(code, verifier))
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: string }).error).toBe('invalid_grant')
   })
 
   it('needs no cookie — that is the entire point', async () => {
@@ -298,20 +296,26 @@ describe('the authorization_code grant', () => {
   })
 })
 
-describe('the session grant still works', () => {
-  it('issues a token to the account page without any redirect dance', async () => {
+// The cookie `{ clientId }` grant is gone with Estiva's JSON format (record
+// sign-in-is-plain-oauth): a session cookie alone never buys a token, the code
+// grant above is the only way from a session to one.
+describe('a session cookie alone', () => {
+  it('gets no token in the old JSON shape', async () => {
     const response = await app.request('/token', {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ clientId: CLIENT }),
     })
-    expect(response.status).toBe(200)
-    expect(((await response.json()) as { pubkey: string }).pubkey).toBe(ada.pubkey)
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: string; access_token?: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.access_token).toBeUndefined()
   })
 
-  it('still refuses without a session', async () => {
-    const response = await exchange({ clientId: CLIENT })
-    expect(response.status).toBe(401)
+  it('gets no token in the form format without a grant', async () => {
+    const response = await requestToken(app, { client_id: CLIENT }, { cookie })
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { access_token?: string }).access_token).toBeUndefined()
   })
 })
 
@@ -338,8 +342,8 @@ describe('discovery', () => {
  *
  * The safety argument is the absent header rather than a present one — without
  * `Access-Control-Allow-Credentials` a browser will neither attach the session
- * cookie cross-origin nor expose a credentialed response, so the session grant
- * stays same-origin while the code grant works.
+ * cookie cross-origin nor expose a credentialed response, so another origin can
+ * read a token only by holding a code and its verifier.
  */
 describe('CORS on /token', () => {
   const ORIGIN = 'https://ship.test'
@@ -385,17 +389,17 @@ describe('CORS on /token', () => {
   })
 
   it('echoes the origin on a real exchange', async () => {
-    const response = await app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: ORIGIN },
-      body: JSON.stringify({
-        grantType: 'authorization_code',
+    const response = await requestToken(
+      app,
+      {
+        grant_type: 'authorization_code',
         code: 'nope',
-        clientId: CLIENT,
-        redirectUri: REDIRECT,
-        codeVerifier: 'x'.repeat(43),
-      }),
-    })
+        client_id: CLIENT,
+        redirect_uri: REDIRECT,
+        code_verifier: 'x'.repeat(43),
+      },
+      { origin: ORIGIN },
+    )
     expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
   })
 })

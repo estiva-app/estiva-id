@@ -2,9 +2,10 @@
  * Authorization codes with PKCE (PEEK-90).
  *
  * The bridge between "signed in on this origin" and "an app on another origin
- * holds a token". `POST /token`'s session grant cannot cross origins — the
- * cookie is `SameSite=Lax` and there is no CORS — and neither of those should
- * be relaxed on the origin that holds every custodied signing key.
+ * holds a token", and the only one: `POST /token` takes no session cookie. The
+ * cookie could not cross origins anyway — it is `SameSite=Lax` and `/token`
+ * allows no credentials — and neither of those should be relaxed on the origin
+ * that holds every custodied signing key.
  *
  * A code is a bearer credential in transit through a browser redirect, so it is
  * treated like one: hashed at rest, expiring in a minute, usable once, and

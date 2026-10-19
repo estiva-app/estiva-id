@@ -33,6 +33,7 @@ import { createHash } from 'node:crypto'
 import type { SignedEvent, UnsignedEvent } from '../src/nostr/event.js'
 import { verifyEvent } from '../src/nostr/keys.js'
 import { SoftwareAuthenticator } from '../src/test/authenticator.js'
+import { signIn } from './sign-in.js'
 
 const ID_BASE = process.env.ID_BASE ?? 'http://localhost:8787'
 const RP_ID = process.env.RP_ID ?? 'localhost'
@@ -77,9 +78,7 @@ async function authenticate(): Promise<{ pubkey: string; token: string }> {
   const { pubkey } = (await verifyResponse.json()) as { pubkey: string }
 
   const cookie = (verifyResponse.headers.get('set-cookie') ?? '').split(';')[0] as string
-  const tokenResponse = await idPost('/token', { clientId: CLIENT_ID }, { cookie })
-  if (!tokenResponse.ok) throw new Error(`token: ${await tokenResponse.text()}`)
-  const { access_token } = (await tokenResponse.json()) as { access_token: string }
+  const { access_token } = await signIn(ID_BASE, cookie, CLIENT_ID)
 
   return { pubkey, token: access_token }
 }

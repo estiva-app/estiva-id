@@ -46,6 +46,7 @@ import { createHash } from 'node:crypto'
 import type { SignedEvent, UnsignedEvent } from '../src/nostr/event.js'
 import { verifyEvent } from '../src/nostr/keys.js'
 import { SoftwareAuthenticator } from '../src/test/authenticator.js'
+import { signIn } from './sign-in.js'
 
 const ID_BASE = (process.env.ID_BASE ?? 'http://localhost:8787').replace(/\/+$/, '')
 const RP_ID = process.env.RP_ID ?? 'localhost'
@@ -122,11 +123,7 @@ async function register(): Promise<Session> {
 async function tokenFor(session: Session, clientId: string): Promise<string> {
   const held = session.tokens.get(clientId)
   if (held) return held
-  const { access_token } = await idJson<{ access_token: string }>('/token', {
-    method: 'POST',
-    headers: { cookie: session.cookie },
-    body: JSON.stringify({ clientId }),
-  })
+  const { access_token } = await signIn(ID_BASE, session.cookie, clientId)
   session.tokens.set(clientId, access_token)
   return access_token
 }

@@ -18,6 +18,7 @@ import { createInvite } from '../../domain/invites.js'
 import { createOwnBot, createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { SoftwareAuthenticator } from '../../test/authenticator.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 import { resetDeviceRateLimitForTests } from './device.js'
 
@@ -117,12 +118,12 @@ async function peekToken(cookie: string) {
   return {
     code,
     exchange: () =>
-      post('/token', {
-        grantType: 'authorization_code',
-        code,
-        clientId: PEEK,
-        redirectUri: REDIRECT,
-        codeVerifier: verifier,
+      requestToken(app, {
+        grant_type: 'authorization_code',
+        code: code ?? '',
+        client_id: PEEK,
+        redirect_uri: REDIRECT,
+        code_verifier: verifier,
       }),
   }
 }
@@ -213,10 +214,10 @@ describe('the device flow', () => {
 
     // The refresh grant keeps naming the bot.
     const refreshed = (await (
-      await post('/token', {
-        grantType: 'refresh_token',
-        refreshToken: token.refresh_token,
-        clientId: PEEK,
+      await requestToken(app, {
+        grant_type: 'refresh_token',
+        refresh_token: token.refresh_token,
+        client_id: PEEK,
       })
     ).json()) as { access_token: string }
     expect(decodeJwt(refreshed.access_token).act).toEqual({ sub: bot.clientId })
