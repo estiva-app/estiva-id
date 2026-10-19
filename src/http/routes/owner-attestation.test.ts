@@ -21,15 +21,16 @@ import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.j
 import { createUserWithKey, setUserStatus } from '../../domain/users.js'
 import { verifyAuthTag } from '../../nostr/nip-oa.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 
 const app = createApp()
 
 const tokenFor = (clientId: string, clientSecret: string) =>
-  app.request('/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ grantType: 'client_credentials', clientId, clientSecret }),
+  requestToken(app, {
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
   })
 
 interface IssuedToken {

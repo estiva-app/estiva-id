@@ -5,14 +5,16 @@
  *     — what a relying party resolves. `convex/auth.config.ts` takes a `domain`
  *     plus an `applicationID` and finds JWKS from discovery, the same way a
  *     Clerk or Auth0 integration does.
- *   * `POST /token` — the browser-side handoff, in its minimal form: exchange a
- *     session on this origin for a short-lived JWT scoped to one app.
+ *   * `POST /token` — a short-lived JWT scoped to one app, in the standard
+ *     OAuth format only: an `application/x-www-form-urlencoded` body with RFC
+ *     6749's parameter names, answered with §5.2 errors (record
+ *     sign-in-is-plain-oauth). `grant_type` selects the grant.
  *
- * **Two grants, and both are needed.**
+ * **Three grants.**
  *
- *   * `authorization_code` with PKCE (PEEK-90) — how an app on another origin
- *     gets a token. The session cookie is `SameSite=Lax`, so it is not sent on
- *     a cross-site `fetch` at all; relaxing that on the origin holding every
+ *   * `authorization_code` with PKCE (PEEK-90) — how a person's app gets a
+ *     token. The session cookie is `SameSite=Lax`, so it is not sent on a
+ *     cross-site `fetch` at all; relaxing that on the origin holding every
  *     custodied key is not worth it, so the redirect flow is the answer.
  *
  *     This endpoint *does* send CORS headers, and that is not a contradiction:
@@ -21,17 +23,14 @@
  *     response to a request it authenticated with a code and a PKCE verifier —
  *     credentials it already holds. Discovering that distinction cost one
  *     failed exchange; see the middleware below.
- *   * The original session grant — kept, because the account page is served
- *     from this very origin and making it round-trip through a redirect to talk
- *     to its own backend would be ceremony with no security to show for it.
+ *   * `refresh_token` (PEEK-108) — how that app renews without the person.
+ *   * `client_credentials` (PEEK-34) — how a role identity's server gets one.
  *
- * The body's shape selects the grant: `{ grantType: 'authorization_code', … }`
- * takes the new path, anything else takes the session path. That keeps the
- * existing callers working unchanged.
+ * A session cookie alone never buys a token: the cookie `{ clientId }` grant
+ * went with Estiva's own JSON format (AUT-5).
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { config } from '../../config.js'
 import { findAppPolicy } from '../../domain/apps.js'
@@ -42,20 +41,12 @@ import { type TokenDelegate, discoveryDocument, issueToken, publicJwks } from '.
 import { getActivePubkey } from '../../domain/keys.js'
 import { issueRefreshToken, redeemRefreshToken } from '../../domain/refresh.js'
 import { authenticateServiceCredential } from '../../domain/roles.js'
-import {
-  SESSION_COOKIE,
-  type Session,
-  findSessionById,
-  resolveSession,
-  touchSession,
-} from '../../domain/sessions.js'
+import { type Session, findSessionById, touchSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { AppError, badRequest, forbidden, unauthenticated } from '../../errors.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
-
-const sessionGrantSchema = z.object({ clientId: z.string().min(1) })
 
 const codeGrantSchema = z.object({
   grantType: z.literal('authorization_code'),
@@ -91,10 +82,7 @@ const refreshGrantSchema = z.object({
   clientId: z.string().min(1),
 })
 
-/**
- * The RFC 6749 §5.2 error a refusal answers with, when the request came in the
- * standard form format. The JSON format keeps this service's own error shape.
- */
+/** The RFC 6749 §5.2 error a refusal answers with. */
 type OAuthErrorCode =
   | 'invalid_request'
   | 'invalid_client'
@@ -189,7 +177,7 @@ function readBasicAuth(c: Context<AppEnv>, body: Record<string, string>): void {
   body.clientSecret = clientSecret
 }
 
-/** A form request's answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
+/** The answer to a refusal: RFC 6749 §5.2, `invalid_client` as 401. */
 function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErrorCode) {
   c.get('log')?.warn({ code: error.code, oauth, detail: error.detail }, error.message)
   const description = error.message === oauth ? undefined : error.message
@@ -203,9 +191,9 @@ function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErr
  * The token body every grant returns.
  *
  * `refresh_token` is present only where one was minted — the code and refresh
- * grants. The session grant is same-origin and the client-credentials grant has
- * a secret it can present again, so neither needs one, and issuing a long-lived
- * credential to a caller with no use for it is pure downside.
+ * grants. The client-credentials grant has a secret it can present again, so it
+ * needs none, and issuing a long-lived credential to a caller with no use for it
+ * is pure downside.
  *
  * ## `allowed_kinds`, and why it is here rather than nowhere
  *
@@ -281,18 +269,18 @@ export function tokenRoutes(): Hono<AppEnv> {
    * this the redirect completes, the code comes back, and the exchange dies at
    * the preflight — which is exactly what happened the first time Ship tried it.
    *
-   * The rules, and why the session grant stays same-origin-only regardless, are
-   * in `http/cors.ts`.
+   * The rules, and why the session cookie never rides along regardless, are in
+   * `http/cors.ts`.
    */
   routes.options('/token', preflight('POST, OPTIONS', 'content-type'))
 
   /**
-   * The grant is chosen by the body, not by a separate route, so relying
+   * The grant is chosen by `grant_type`, not by a separate route, so relying
    * parties have one token endpoint to configure — which is also what
    * discovery advertises.
    *
-   * `requireSession` cannot be middleware here: the code grant has no session
-   * by definition, and a cross-origin caller has no cookie to send.
+   * `requireSession` cannot be middleware here: no grant takes a session
+   * cookie, and a cross-origin caller has none to send.
    */
   routes.post('/token', async (c) => {
     // Sets the header when the origin is registered; a same-origin request has
@@ -303,130 +291,28 @@ export function tokenRoutes(): Hono<AppEnv> {
     c.header('pragma', 'no-cache')
 
     /*
-      The standard format (record sign-in-is-plain-oauth): what any OAuth
-      library sends, answered with RFC 6749 §5.2 errors. It never falls through
-      to the cookie grant below, which no standard client knows.
+      The standard format only (record sign-in-is-plain-oauth): what any OAuth
+      library sends, answered with RFC 6749 §5.2 errors. Estiva's own JSON
+      format, and the cookie `{ clientId }` grant that came with it, are gone.
       why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md
     */
-    const mediaType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
-    if (mediaType === 'application/x-www-form-urlencoded') {
-      try {
-        return await formGrant(c)
-      } catch (error) {
-        if (error instanceof TokenRefusal) return oauthErrorResponse(c, error, error.oauth)
-        if (error instanceof AppError && error.status === 400) {
-          return oauthErrorResponse(c, error, 'invalid_request')
-        }
-        throw error
+    try {
+      const mediaType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
+      if (mediaType !== 'application/x-www-form-urlencoded') {
+        throw refused(
+          badRequest('Send the request as application/x-www-form-urlencoded (RFC 6749 §4)'),
+          'invalid_request',
+        )
       }
+      return await formGrant(c)
+    } catch (error) {
+      if (error instanceof TokenRefusal) return oauthErrorResponse(c, error, error.oauth)
+      if (error instanceof AppError && error.status === 400) {
+        return oauthErrorResponse(c, error, 'invalid_request')
+      }
+      throw error
     }
-
-    // Estiva's own JSON format, until Peek, Ship and Leaf have moved off it.
-    const body: unknown = await c.req.json().catch(() => null)
-
-    const codeGrant = codeGrantSchema.safeParse(body)
-    const serviceGrant = serviceGrantSchema.safeParse(body)
-    const refreshGrant = refreshGrantSchema.safeParse(body)
-    logJsonFormat(c, body)
-
-    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
-    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
-    if (refreshGrant.success) return exchangeRefreshToken(c, refreshGrant.data)
-
-    // Not any of the explicit grants. If it *looked* like one, say so rather
-    // than falling through to a confusing "no session cookie" — a client with a
-    // malformed grant request has a cookie problem only by coincidence.
-    //
-    // The issues reported are the ones for the grant it named, not the code
-    // grant's: telling somebody who sent `refresh_token` that their `code` is
-    // missing is a worse error than no error.
-    if (typeof body === 'object' && body !== null && 'grantType' in body) {
-      const named = (body as { grantType?: unknown }).grantType
-      const failure =
-        named === 'refresh_token'
-          ? refreshGrant.error
-          : named === 'client_credentials'
-            ? serviceGrant.error
-            : codeGrant.error
-      throw badRequest(`Invalid ${typeof named === 'string' ? named : 'grant'} request`, {
-        issues: failure.issues.map((issue) => ({
-          path: issue.path.join('.'),
-          message: issue.message,
-        })),
-      })
-    }
-
-    const token = getCookie(c, SESSION_COOKIE)
-    if (!token) throw unauthenticated('No session cookie')
-    const session = await resolveSession(token)
-    if (!session) throw unauthenticated('Session expired or revoked')
-    const { userId } = session
-    const delegate = tokenDelegate(session)
-
-    const parsed = sessionGrantSchema.safeParse(body)
-    if (!parsed.success) throw badRequest('Expected { clientId }')
-
-    // Tokens are audience-bound, so an unknown or disabled app must not get one
-    // — otherwise /sign would be deciding policy for an app that does not exist.
-    const app = await findAppPolicy(parsed.data.clientId)
-    if (!app || app.status !== 'active') throw appRefused()
-
-    // Sessions outlive an offboarding unless something revokes them, and a
-    // session is all `/token` needs. Checking the person here is what stops a
-    // leaver refreshing their way past the JWT expiry indefinitely.
-    const user = await findUserById(userId)
-    if (!user || user.status !== 'active') {
-      await recordAudit({
-        actorType: 'user',
-        actorUserId: userId,
-        actorClientId: parsed.data.clientId,
-        action: 'token.issue',
-        outcome: 'refused',
-        detail: { reason: user ? `user_${user.status}` : 'user_missing' },
-        requestId: c.get('requestId'),
-      })
-      throw personRefused()
-    }
-
-    const pubkey = await getActivePubkey(userId)
-    if (!pubkey) throw noKey()
-
-    const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
-
-    await recordAudit({
-      actorType: 'user',
-      actorUserId: userId,
-      actorClientId: app.clientId,
-      action: 'token.issue',
-      outcome: 'success',
-      subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn, ...delegateDetail(delegate) },
-      requestId: c.get('requestId'),
-    })
-
-    return c.json(tokenResponse(issued, app.allowedKinds))
   })
-
-  /**
-   * One line per JSON-format request, so its removal can wait until nobody
-   * sends it (AUT-5): the client and grant it named, and where it came from.
-   * Never the secret, the code or a token. Goes with the JSON branch.
-   */
-  function logJsonFormat(c: Context<AppEnv>, body: unknown) {
-    const isObject = typeof body === 'object' && body !== null && !Array.isArray(body)
-    const fields = isObject ? (body as Record<string, unknown>) : {}
-    const named = (key: string) =>
-      typeof fields[key] === 'string' ? (fields[key] as string).slice(0, 64) : undefined
-    c.get('log').warn(
-      {
-        clientId: named('clientId') ?? null,
-        grant: named('grantType') ?? (isObject ? 'session_cookie' : 'not_an_object'),
-        origin: c.req.header('origin')?.slice(0, 200) ?? null,
-        userAgent: c.req.header('user-agent')?.slice(0, 120) ?? null,
-      },
-      'token request in the JSON format',
-    )
-  }
 
   /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
   async function formGrant(c: Context<AppEnv>) {
@@ -513,8 +399,8 @@ export function tokenRoutes(): Hono<AppEnv> {
     const app = await findAppPolicy(redemption.clientId)
     if (!app || app.status !== 'active') throw appRefused()
 
-    // Same reason the session grant checks: offboarding must take effect within
-    // the JWT TTL, and a code issued a minute ago is not evidence of anything.
+    // Offboarding must take effect within the JWT TTL, and a code issued a
+    // minute ago is not evidence of anything.
     const user = await findUserById(redemption.userId)
     if (!user || user.status !== 'active') {
       await recordAudit({

@@ -14,9 +14,8 @@ import type { AppEnv } from '../app.js'
  *
  * ## Delegated sessions are refused here (PER-22)
  *
- * A session a person granted to their bot reaches app sign-in — `/authorize`
- * and `/token`, which resolve the cookie themselves — and nothing behind this
- * guard. Refused by default rather than listed per route, so the next account
+ * A session a person granted to their bot reaches app sign-in — `/authorize`,
+ * which resolves the cookie itself — and nothing behind this guard. Refused by default rather than listed per route, so the next account
  * or admin route added is closed to a bot without anybody remembering to close
  * it. The few that are safe opt in with {@link requireAnySession}.
  */

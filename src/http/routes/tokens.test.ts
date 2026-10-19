@@ -19,10 +19,12 @@ import { issueToken } from '../../domain/jwt.js'
 import { createRoleIdentity, issueServiceCredential } from '../../domain/roles.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken, signIn } from '../../test/token.js'
 import { createApp } from '../app.js'
 
 const app = createApp()
 const cfg = config()
+const REDIRECT = 'https://peek.test/callback'
 
 /**
  * A relying party. Knows the issuer URL and an application id, nothing else —
@@ -51,6 +53,10 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await truncateAll()
+  await query('update app_credentials set redirect_uris = $1 where client_id = $2', [
+    [REDIRECT],
+    'estiva-peek',
+  ])
 })
 afterAll(async () => {
   await closePool()
@@ -153,36 +159,77 @@ describe('token validation by a relying party', () => {
 })
 
 describe('POST /token', () => {
-  it('requires a session', async () => {
+  // Estiva's own JSON format is gone (record sign-in-is-plain-oauth): any
+  // grant sent in it is refused before it is read, with the §5.2 error.
+  it('refuses a request in the JSON format, whatever it names', async () => {
+    const bot = await createRoleIdentity({ displayName: 'JSON Bot' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'json-bot',
+      name: 'JSON Bot',
+      allowedKinds: [9],
+    })
+
     const response = await app.request('/token', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId: 'estiva-peek' }),
+      body: JSON.stringify({
+        grantType: 'client_credentials',
+        clientId: credential.clientId,
+        clientSecret: credential.secret,
+      }),
+    })
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: string; access_token?: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.access_token).toBeUndefined()
+  })
+
+  it('refuses a body whose media type only looks like the form', async () => {
+    const bot = await createRoleIdentity({ displayName: 'Lookalike Bot' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'lookalike-bot',
+      name: 'Lookalike Bot',
+      allowedKinds: [9],
+    })
+
+    const response = await requestToken(
+      app,
+      {
+        grant_type: 'client_credentials',
+        client_id: credential.clientId,
+        client_secret: credential.secret,
+      },
+      { 'content-type': 'application/x-www-form-data' },
+    )
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: string; access_token?: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.access_token).toBeUndefined()
+  })
+
+  it('refuses to mint a token for an app that has been disabled', async () => {
+    const ada = await createUserWithKey({ email: 'ada@example.test' })
+    const signedIn = (await (
+      await signIn(app, await sessionFor(ada.id), 'estiva-peek', REDIRECT)
+    ).json()) as { refresh_token: string }
+    await query("update app_credentials set status = 'disabled' where client_id = 'estiva-peek'")
+
+    const response = await requestToken(app, {
+      grant_type: 'refresh_token',
+      refresh_token: signedIn.refresh_token,
+      client_id: 'estiva-peek',
     })
     expect(response.status).toBe(401)
+    expect(((await response.json()) as { error: string }).error).toBe('invalid_client')
   })
 
-  it('refuses to mint a token for an unknown app', async () => {
+  it('exchanges a sign-in for a token a relying party accepts', async () => {
     const ada = await createUserWithKey({ email: 'ada@example.test' })
     const cookie = await sessionFor(ada.id)
 
-    const response = await app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
-      body: JSON.stringify({ clientId: 'not-an-app' }),
-    })
-    expect(response.status).toBe(403)
-  })
-
-  it('exchanges a session for a token a relying party accepts', async () => {
-    const ada = await createUserWithKey({ email: 'ada@example.test' })
-    const cookie = await sessionFor(ada.id)
-
-    const response = await app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
-      body: JSON.stringify({ clientId: 'estiva-peek' }),
-    })
+    const response = await signIn(app, cookie, 'estiva-peek', REDIRECT)
     expect(response.status).toBe(200)
 
     const body = (await response.json()) as { access_token: string; token_type: string }
@@ -206,15 +253,11 @@ describe('POST /token', () => {
  * Asserted on **every grant**, because the failure was never specific to one.
  */
 describe('the ceiling a token carries', () => {
-  it('tells a session grant what it may sign', async () => {
+  it('tells a person signing in what they may sign', async () => {
     const ada = await createUserWithKey({ email: 'ceiling-session@example.test' })
     const cookie = await sessionFor(ada.id)
 
-    const response = await app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
-      body: JSON.stringify({ clientId: 'estiva-peek' }),
-    })
+    const response = await signIn(app, cookie, 'estiva-peek', REDIRECT)
     expect(response.status).toBe(200)
 
     const body = (await response.json()) as { allowed_kinds: number[] }
@@ -234,14 +277,10 @@ describe('the ceiling a token carries', () => {
       allowedKinds: [27235, 9],
     })
 
-    const response = await app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        grantType: 'client_credentials',
-        clientId: credential.clientId,
-        clientSecret: credential.secret,
-      }),
+    const response = await requestToken(app, {
+      grant_type: 'client_credentials',
+      client_id: credential.clientId,
+      client_secret: credential.secret,
     })
     expect(response.status).toBe(200)
 

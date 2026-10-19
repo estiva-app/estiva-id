@@ -27,6 +27,7 @@ import {
 import { createSession } from '../../domain/sessions.js'
 import { createUserWithKey, setUserStatus } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 
 const app = createApp()
@@ -64,7 +65,11 @@ async function botWithCredential(kinds: number[] = [1]) {
 }
 
 const tokenFor = (clientId: string, clientSecret: string) =>
-  post('/token', { grantType: 'client_credentials', clientId, clientSecret })
+  requestToken(app, {
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+  })
 
 beforeAll(async () => {
   await prepareDatabase()

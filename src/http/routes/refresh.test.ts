@@ -12,6 +12,7 @@ import { closePool, query } from '../../db/pool.js'
 import { createSession, revokeSession } from '../../domain/sessions.js'
 import { createUserWithKey, setUserStatus } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
+import { requestToken } from '../../test/token.js'
 import { createApp } from '../app.js'
 
 const app = createApp()
@@ -25,12 +26,7 @@ function pkce() {
   return { verifier, challenge }
 }
 
-const post = (body: Record<string, unknown>) =>
-  app.request('/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+const post = (params: Record<string, string>) => requestToken(app, params)
 
 interface TokenBody {
   access_token?: string
@@ -51,17 +47,17 @@ async function signIn(cookie: string): Promise<TokenBody> {
   const authorized = await app.request(`/authorize?${params.toString()}`, { headers: { cookie } })
   const code = new URL(authorized.headers.get('location') ?? '').searchParams.get('code')
   const response = await post({
-    grantType: 'authorization_code',
-    code,
-    clientId: CLIENT,
-    redirectUri: REDIRECT,
-    codeVerifier: verifier,
+    grant_type: 'authorization_code',
+    code: code ?? '',
+    client_id: CLIENT,
+    redirect_uri: REDIRECT,
+    code_verifier: verifier,
   })
   return (await response.json()) as TokenBody
 }
 
 const refresh = (refreshToken: string, clientId = CLIENT) =>
-  post({ grantType: 'refresh_token', refreshToken, clientId })
+  post({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId })
 
 /** Move a spent token's spend into the past, as the clock would. */
 const spentSecondsAgo = (refreshToken: string, seconds: number) =>
@@ -298,7 +294,7 @@ describe('the refresh grant', () => {
 
   /** A malformed refresh request should not be reported as a broken code request. */
   it('names the grant it failed to parse', async () => {
-    const response = await post({ grantType: 'refresh_token', clientId: CLIENT })
+    const response = await post({ grant_type: 'refresh_token', client_id: CLIENT })
     expect(response.status).toBe(400)
     expect(JSON.stringify(await response.json())).toMatch(/refresh_token/)
   })

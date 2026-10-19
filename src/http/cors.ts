@@ -10,8 +10,8 @@
  *    to a credentialed request — so cookie-authenticated routes stay
  *    same-origin-only while bearer-authenticated ones work from anywhere
  *    registered. Every route here authenticates with something the caller
- *    already holds and sends explicitly: a code and a PKCE verifier, or a
- *    bearer token. No ambient authority is being shared.
+ *    already holds and sends explicitly: a code and a PKCE verifier, a refresh
+ *    token, or a bearer token. No ambient authority is being shared.
  *
  * This started inside `routes/tokens.ts` as "CORS for /token, and only for
  * /token". The private directory (PEEK-30) is the second endpoint a browser app

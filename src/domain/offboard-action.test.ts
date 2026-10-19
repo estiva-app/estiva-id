@@ -13,9 +13,10 @@
  * hands back the command, rather than reporting a success that is not true.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { closePool, queryOne } from '../db/pool.js'
+import { closePool, query, queryOne } from '../db/pool.js'
 import { createApp } from '../http/app.js'
 import { prepareDatabase, truncateAll } from '../test/db.js'
+import { requestToken, signIn } from '../test/token.js'
 import { listAudit } from './audit-log.js'
 import { listActiveCredentials } from './credentials.js'
 import { insertCredential } from './credentials.js'
@@ -26,6 +27,7 @@ import { createSession, resolveSession } from './sessions.js'
 import { createUserWithKey, findUserById } from './users.js'
 
 const app = createApp()
+const REDIRECT = 'https://peek.test/callback'
 
 /** Accept the profile publish so the attestation step can be exercised. */
 function relayAccepts() {
@@ -208,6 +210,13 @@ describe('what the leaver can no longer do here', () => {
   it('cannot take a token or sign, immediately', async () => {
     const leaver = await person('leaver@example.test')
     const { token: sessionToken } = await createSession({ userId: leaver.id })
+    const cookie = `estiva_id_session=${sessionToken}`
+    await query('update app_credentials set redirect_uris = $1 where client_id = $2', [
+      [REDIRECT],
+      'estiva-peek',
+    ])
+    const signedIn = await signIn(app, cookie, 'estiva-peek', REDIRECT)
+    const { refresh_token } = (await signedIn.json()) as { refresh_token: string }
     // A JWT minted *before* the offboarding, to prove the check is not merely
     // "we stopped issuing new ones".
     const { token: bearer } = await issueToken({
@@ -219,15 +228,15 @@ describe('what the leaver can no longer do here', () => {
     await offboardPerson(leaver.id)
     vi.unstubAllGlobals()
 
-    const tokenAttempt = await app.request('/token', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: `estiva_id_session=${sessionToken}`,
-      },
-      body: JSON.stringify({ clientId: 'estiva-peek' }),
+    const renewal = await requestToken(app, {
+      grant_type: 'refresh_token',
+      refresh_token,
+      client_id: 'estiva-peek',
     })
-    expect(tokenAttempt.status).toBe(401)
+    expect(renewal.status).toBe(400)
+    // No code from `/authorize` (`invalid_request`), not a code refused later (`invalid_grant`).
+    const signInAgain = await signIn(app, cookie, 'estiva-peek', REDIRECT)
+    expect(((await signInAgain.json()) as { error?: string }).error).toBe('invalid_request')
 
     const signAttempt = await app.request('/sign', {
       method: 'POST',
