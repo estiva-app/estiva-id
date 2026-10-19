@@ -325,12 +325,12 @@ export function tokenRoutes(): Hono<AppEnv> {
     const body: unknown = await c.req.json().catch(() => null)
 
     const codeGrant = codeGrantSchema.safeParse(body)
-    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
-
     const serviceGrant = serviceGrantSchema.safeParse(body)
-    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
-
     const refreshGrant = refreshGrantSchema.safeParse(body)
+    logJsonFormat(c, body)
+
+    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
+    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
     if (refreshGrant.success) return exchangeRefreshToken(c, refreshGrant.data)
 
     // Not any of the explicit grants. If it *looked* like one, say so rather
@@ -406,6 +406,27 @@ export function tokenRoutes(): Hono<AppEnv> {
 
     return c.json(tokenResponse(issued, app.allowedKinds))
   })
+
+  /**
+   * One line per JSON-format request, so its removal can wait until nobody
+   * sends it (AUT-5): the client and grant it named, and where it came from.
+   * Never the secret, the code or a token. Goes with the JSON branch.
+   */
+  function logJsonFormat(c: Context<AppEnv>, body: unknown) {
+    const isObject = typeof body === 'object' && body !== null && !Array.isArray(body)
+    const fields = isObject ? (body as Record<string, unknown>) : {}
+    const named = (key: string) =>
+      typeof fields[key] === 'string' ? (fields[key] as string).slice(0, 64) : undefined
+    c.get('log').warn(
+      {
+        clientId: named('clientId') ?? null,
+        grant: named('grantType') ?? (isObject ? 'session_cookie' : 'not_an_object'),
+        origin: c.req.header('origin')?.slice(0, 200) ?? null,
+        userAgent: c.req.header('user-agent')?.slice(0, 120) ?? null,
+      },
+      'token request in the JSON format',
+    )
+  }
 
   /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
   async function formGrant(c: Context<AppEnv>) {
