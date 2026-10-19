@@ -31,7 +31,6 @@
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { config } from '../../config.js'
 import { findAppPolicy } from '../../domain/apps.js'
@@ -42,20 +41,12 @@ import { type TokenDelegate, discoveryDocument, issueToken, publicJwks } from '.
 import { getActivePubkey } from '../../domain/keys.js'
 import { issueRefreshToken, redeemRefreshToken } from '../../domain/refresh.js'
 import { authenticateServiceCredential } from '../../domain/roles.js'
-import {
-  SESSION_COOKIE,
-  type Session,
-  findSessionById,
-  resolveSession,
-  touchSession,
-} from '../../domain/sessions.js'
+import { type Session, findSessionById, touchSession } from '../../domain/sessions.js'
 import { findUserById } from '../../domain/users.js'
 import { AppError, badRequest, forbidden, unauthenticated } from '../../errors.js'
 import type { AuthTag } from '../../nostr/nip-oa.js'
 import type { AppEnv } from '../app.js'
 import { allowOrigin, preflight } from '../cors.js'
-
-const sessionGrantSchema = z.object({ clientId: z.string().min(1) })
 
 const codeGrantSchema = z.object({
   grantType: z.literal('authorization_code'),
@@ -303,130 +294,28 @@ export function tokenRoutes(): Hono<AppEnv> {
     c.header('pragma', 'no-cache')
 
     /*
-      The standard format (record sign-in-is-plain-oauth): what any OAuth
-      library sends, answered with RFC 6749 §5.2 errors. It never falls through
-      to the cookie grant below, which no standard client knows.
+      The standard format only (record sign-in-is-plain-oauth): what any OAuth
+      library sends, answered with RFC 6749 §5.2 errors. Estiva's own JSON
+      format, and the cookie `{ clientId }` grant that came with it, are gone.
       why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/sign-in-is-plain-oauth.md
     */
-    const mediaType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
-    if (mediaType === 'application/x-www-form-urlencoded') {
-      try {
-        return await formGrant(c)
-      } catch (error) {
-        if (error instanceof TokenRefusal) return oauthErrorResponse(c, error, error.oauth)
-        if (error instanceof AppError && error.status === 400) {
-          return oauthErrorResponse(c, error, 'invalid_request')
-        }
-        throw error
+    try {
+      const mediaType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
+      if (mediaType !== 'application/x-www-form-urlencoded') {
+        throw refused(
+          badRequest('Send the request as application/x-www-form-urlencoded (RFC 6749 §4)'),
+          'invalid_request',
+        )
       }
+      return await formGrant(c)
+    } catch (error) {
+      if (error instanceof TokenRefusal) return oauthErrorResponse(c, error, error.oauth)
+      if (error instanceof AppError && error.status === 400) {
+        return oauthErrorResponse(c, error, 'invalid_request')
+      }
+      throw error
     }
-
-    // Estiva's own JSON format, until Peek, Ship and Leaf have moved off it.
-    const body: unknown = await c.req.json().catch(() => null)
-
-    const codeGrant = codeGrantSchema.safeParse(body)
-    const serviceGrant = serviceGrantSchema.safeParse(body)
-    const refreshGrant = refreshGrantSchema.safeParse(body)
-    logJsonFormat(c, body)
-
-    if (codeGrant.success) return exchangeAuthorizationCode(c, codeGrant.data)
-    if (serviceGrant.success) return exchangeClientCredentials(c, serviceGrant.data)
-    if (refreshGrant.success) return exchangeRefreshToken(c, refreshGrant.data)
-
-    // Not any of the explicit grants. If it *looked* like one, say so rather
-    // than falling through to a confusing "no session cookie" — a client with a
-    // malformed grant request has a cookie problem only by coincidence.
-    //
-    // The issues reported are the ones for the grant it named, not the code
-    // grant's: telling somebody who sent `refresh_token` that their `code` is
-    // missing is a worse error than no error.
-    if (typeof body === 'object' && body !== null && 'grantType' in body) {
-      const named = (body as { grantType?: unknown }).grantType
-      const failure =
-        named === 'refresh_token'
-          ? refreshGrant.error
-          : named === 'client_credentials'
-            ? serviceGrant.error
-            : codeGrant.error
-      throw badRequest(`Invalid ${typeof named === 'string' ? named : 'grant'} request`, {
-        issues: failure.issues.map((issue) => ({
-          path: issue.path.join('.'),
-          message: issue.message,
-        })),
-      })
-    }
-
-    const token = getCookie(c, SESSION_COOKIE)
-    if (!token) throw unauthenticated('No session cookie')
-    const session = await resolveSession(token)
-    if (!session) throw unauthenticated('Session expired or revoked')
-    const { userId } = session
-    const delegate = tokenDelegate(session)
-
-    const parsed = sessionGrantSchema.safeParse(body)
-    if (!parsed.success) throw badRequest('Expected { clientId }')
-
-    // Tokens are audience-bound, so an unknown or disabled app must not get one
-    // — otherwise /sign would be deciding policy for an app that does not exist.
-    const app = await findAppPolicy(parsed.data.clientId)
-    if (!app || app.status !== 'active') throw appRefused()
-
-    // Sessions outlive an offboarding unless something revokes them, and a
-    // session is all `/token` needs. Checking the person here is what stops a
-    // leaver refreshing their way past the JWT expiry indefinitely.
-    const user = await findUserById(userId)
-    if (!user || user.status !== 'active') {
-      await recordAudit({
-        actorType: 'user',
-        actorUserId: userId,
-        actorClientId: parsed.data.clientId,
-        action: 'token.issue',
-        outcome: 'refused',
-        detail: { reason: user ? `user_${user.status}` : 'user_missing' },
-        requestId: c.get('requestId'),
-      })
-      throw personRefused()
-    }
-
-    const pubkey = await getActivePubkey(userId)
-    if (!pubkey) throw noKey()
-
-    const issued = await issueToken({ pubkey, clientId: app.clientId, delegate })
-
-    await recordAudit({
-      actorType: 'user',
-      actorUserId: userId,
-      actorClientId: app.clientId,
-      action: 'token.issue',
-      outcome: 'success',
-      subjectPubkey: pubkey,
-      detail: { expiresIn: issued.expiresIn, ...delegateDetail(delegate) },
-      requestId: c.get('requestId'),
-    })
-
-    return c.json(tokenResponse(issued, app.allowedKinds))
   })
-
-  /**
-   * One line per JSON-format request, so its removal can wait until nobody
-   * sends it (AUT-5): the client and grant it named, and where it came from.
-   * Never the secret, the code or a token. Goes with the JSON branch.
-   */
-  function logJsonFormat(c: Context<AppEnv>, body: unknown) {
-    const isObject = typeof body === 'object' && body !== null && !Array.isArray(body)
-    const fields = isObject ? (body as Record<string, unknown>) : {}
-    const named = (key: string) =>
-      typeof fields[key] === 'string' ? (fields[key] as string).slice(0, 64) : undefined
-    c.get('log').warn(
-      {
-        clientId: named('clientId') ?? null,
-        grant: named('grantType') ?? (isObject ? 'session_cookie' : 'not_an_object'),
-        origin: c.req.header('origin')?.slice(0, 200) ?? null,
-        userAgent: c.req.header('user-agent')?.slice(0, 120) ?? null,
-      },
-      'token request in the JSON format',
-    )
-  }
 
   /** A form request: the grant `grant_type` names, or the §5.2 error for it. */
   async function formGrant(c: Context<AppEnv>) {
