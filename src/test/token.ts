@@ -7,18 +7,16 @@ import type { createApp } from '../http/app.js'
 
 type App = ReturnType<typeof createApp>
 
-export function requestToken(
+export async function requestToken(
   app: App,
   params: Record<string, string>,
   headers: Record<string, string> = {},
 ): Promise<Response> {
-  return Promise.resolve(
-    app.request('/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
-      body: new URLSearchParams(params).toString(),
-    }),
-  )
+  return app.request('/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+    body: new URLSearchParams(params).toString(),
+  })
 }
 
 /**

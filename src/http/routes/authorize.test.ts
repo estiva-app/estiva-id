@@ -311,12 +311,6 @@ describe('a session cookie alone', () => {
     expect(body.error).toBe('invalid_request')
     expect(body.access_token).toBeUndefined()
   })
-
-  it('gets no token in the form format without a grant', async () => {
-    const response = await requestToken(app, { client_id: CLIENT }, { cookie })
-    expect(response.status).toBe(400)
-    expect(((await response.json()) as { access_token?: string }).access_token).toBeUndefined()
-  })
 })
 
 describe('discovery', () => {

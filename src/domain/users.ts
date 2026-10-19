@@ -49,9 +49,8 @@ export async function findUserById(id: string): Promise<User | undefined> {
  * Change a person's status, revoking every session as they leave.
  *
  * Both halves are needed and neither is sufficient. Without the status change,
- * `/sign` keeps signing. Without the session revocation, they simply obtain a
- * fresh token from `/token` — a session is all that endpoint requires — and
- * carry on. Offboarding that does only one of these looks like it worked.
+ * `/sign` keeps signing. Without the session revocation, they simply sign in
+ * again on it, or renew with the refresh token it backs, and carry on. Offboarding that does only one of these looks like it worked.
  *
  * **The key is deliberately left active.** A leaver keeps their keypair; that
  * is inherent and not something a database write can undo. What is withdrawn is

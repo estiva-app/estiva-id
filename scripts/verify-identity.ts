@@ -355,7 +355,7 @@ async function main(): Promise<void> {
   const peekPublish = await relayPost(session, peekToken, '/events', asPeek)
   check('Peek published a message', peekPublish.status === 200, peekPublish.text.slice(0, 80))
 
-  const shipToken = await tokenFor(session, 'linear-lite')
+  const shipToken = await tokenFor(session, 'estiva-ship')
   const asShip = await signViaEstivaId(shipToken, {
     pubkey: session.pubkey,
     created_at: Math.floor(Date.now() / 1000),

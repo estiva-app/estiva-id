@@ -185,6 +185,30 @@ describe('POST /token', () => {
     expect(body.access_token).toBeUndefined()
   })
 
+  it('refuses a body whose media type only looks like the form', async () => {
+    const bot = await createRoleIdentity({ displayName: 'Lookalike Bot' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'lookalike-bot',
+      name: 'Lookalike Bot',
+      allowedKinds: [9],
+    })
+
+    const response = await requestToken(
+      app,
+      {
+        grant_type: 'client_credentials',
+        client_id: credential.clientId,
+        client_secret: credential.secret,
+      },
+      { 'content-type': 'application/x-www-form-data' },
+    )
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: string; access_token?: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.access_token).toBeUndefined()
+  })
+
   it('refuses to mint a token for an app that has been disabled', async () => {
     const ada = await createUserWithKey({ email: 'ada@example.test' })
     const signedIn = (await (

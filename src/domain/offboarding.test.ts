@@ -38,6 +38,16 @@ function renew() {
   })
 }
 
+/**
+ * A fresh sign-in on their session, and the §5.2 error it ends in.
+ * `invalid_request` means `/authorize` handed out no code at all; a code it
+ * should not have issued would be refused later, as `invalid_grant`.
+ */
+async function signInRefusal() {
+  const response = await signIn(app, cookie, 'estiva-peek', REDIRECT)
+  return ((await response.json()) as { error?: string }).error
+}
+
 let user: Awaited<ReturnType<typeof createUserWithKey>>
 let token: string
 let cookie: string
@@ -93,7 +103,7 @@ describe('once offboarded', () => {
     expect(sessionsRevoked).toBe(1)
 
     expect((await renew()).status).toBe(400)
-    expect((await signIn(app, cookie, 'estiva-peek', REDIRECT)).status).toBe(400)
+    expect(await signInRefusal()).toBe('invalid_request')
   })
 
   it('refuses a token even if a session somehow survives', async () => {
@@ -101,7 +111,7 @@ describe('once offboarded', () => {
     // revocation having reached every session.
     await query("update users set status = 'offboarded' where id = $1", [user.id])
     expect((await renew()).status).toBe(400)
-    expect((await signIn(app, cookie, 'estiva-peek', REDIRECT)).status).toBe(400)
+    expect(await signInRefusal()).toBe('invalid_request')
   })
 
   it('records the refusal with a reason naming the status', async () => {

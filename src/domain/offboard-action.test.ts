@@ -234,7 +234,9 @@ describe('what the leaver can no longer do here', () => {
       client_id: 'estiva-peek',
     })
     expect(renewal.status).toBe(400)
-    expect((await signIn(app, cookie, 'estiva-peek', REDIRECT)).status).toBe(400)
+    // No code from `/authorize` (`invalid_request`), not a code refused later (`invalid_grant`).
+    const signInAgain = await signIn(app, cookie, 'estiva-peek', REDIRECT)
+    expect(((await signInAgain.json()) as { error?: string }).error).toBe('invalid_request')
 
     const signAttempt = await app.request('/sign', {
       method: 'POST',
