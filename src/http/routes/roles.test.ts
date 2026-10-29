@@ -1015,9 +1015,11 @@ describe('changing what a credential may sign', () => {
     })
     expect(response.status).toBe(200)
 
-    const { access_token } = (await (
+    const { access_token, allowed_types } = (await (
       await tokenFor(credential.clientId, credential.secret)
-    ).json()) as { access_token: string }
+    ).json()) as { access_token: string; allowed_types: string[] }
+    // Answerable before the attempt, as allowed_kinds is (PEEK-172).
+    expect(allowed_types).toEqual(['osnova.project'])
     const save = (type: string) =>
       app.request('/sign', {
         method: 'POST',
@@ -1025,7 +1027,11 @@ describe('changing what a credential may sign', () => {
         body: JSON.stringify({ event: { kind: 45010, tags: [['type', type]], content: '' } }),
       })
     expect((await save('osnova.project')).status).toBe(200)
-    expect((await save('leaf.document')).status).toBe(422)
+    const other = await save('leaf.document')
+    expect(other.status).toBe(422)
+    await expect(other.json()).resolves.toMatchObject({
+      error: { code: 'policy_violation', detail: { reason: 'type_not_allowed' } },
+    })
   })
 
   it('refuses a member', async () => {

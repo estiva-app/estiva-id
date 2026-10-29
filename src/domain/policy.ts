@@ -154,7 +154,8 @@ export function evaluateSignPolicy(
     return refuse('kind_not_allowed', `App ${app.clientId} may not sign kind ${event.kind}`)
   }
 
-  // Each app saves only its own file types: Leaf a document, never a project.
+  // Each app saves only the file types it is listed for; a type no app is
+  // listed for is refused everywhere.
   // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/every-file-is-an-artifact-the-relay-keeps-in-order.md
   if (event.kind === KIND_ARTIFACT) {
     const type = tagValue(event, 'type')

@@ -473,6 +473,8 @@ export interface ServiceCredential {
    * open — and because a second query would be a second chance to forget.
    */
   allowedKinds: number[]
+  /** The file types a 45010 may carry (dce43a38); read with the row, as above. */
+  allowedTypes?: string[]
 }
 
 export interface IssuedServiceCredential extends ServiceCredential {
@@ -582,11 +584,13 @@ export async function authenticateServiceCredential(
     client_secret_hash: Buffer | null
     acts_as_user_id: string | null
     allowed_kinds: number[]
+    allowed_types: string[]
     status: string
     user_status: string | null
     user_kind: string | null
   }>(
-    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.allowed_kinds, a.status,
+    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.allowed_kinds,
+            a.allowed_types, a.status,
             u.status as user_status, u.kind as user_kind
        from app_credentials a
        left join users u on u.id = a.acts_as_user_id
@@ -617,6 +621,7 @@ export async function authenticateServiceCredential(
     name: row.name,
     actsAsUserId: row.acts_as_user_id,
     allowedKinds: row.allowed_kinds,
+    allowedTypes: row.allowed_types,
     pubkey: (await getActivePubkey(row.acts_as_user_id)) ?? null,
   }
 }
