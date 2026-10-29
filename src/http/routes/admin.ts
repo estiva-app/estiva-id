@@ -59,7 +59,11 @@ const roleSchema = z.object({ role: z.enum(['admin', 'member']) })
 
 const renameRoleSchema = z.object({ displayName: z.string().min(1).max(200) })
 
-const kindsSchema = z.object({ allowedKinds: z.array(z.number().int().nonnegative()).max(50) })
+const kindsSchema = z.object({
+  allowedKinds: z.array(z.number().int().nonnegative()).max(50),
+  // The file types a 45010 may carry; absent leaves them as they are.
+  allowedTypes: z.array(z.string().min(1).max(100)).max(20).optional(),
+})
 
 const credentialSchema = z.object({
   clientId: z
@@ -603,6 +607,7 @@ export function adminRoutes(): Hono<AppEnv> {
       changed = await setCredentialKinds({
         clientId: c.req.param('clientId'),
         allowedKinds: body.data.allowedKinds,
+        allowedTypes: body.data.allowedTypes,
       })
     } catch (error) {
       if (error instanceof RoleRefused) {
@@ -623,6 +628,8 @@ export function adminRoutes(): Hono<AppEnv> {
         // something stops working, and nothing else records it.
         from: changed.from,
         to: changed.to,
+        typesFrom: changed.typesFrom,
+        typesTo: changed.typesTo,
       },
       requestId: c.get('requestId'),
     })

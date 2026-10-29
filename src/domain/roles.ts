@@ -335,23 +335,40 @@ export async function retireOwnBot(input: {
 export async function setCredentialKinds(input: {
   clientId: string
   allowedKinds: number[]
-}): Promise<{ clientId: string; from: number[]; to: number[] }> {
+  /** The file types it may save as a 45010; left as they are when absent. */
+  allowedTypes?: string[]
+}): Promise<{
+  clientId: string
+  from: number[]
+  to: number[]
+  typesFrom: string[]
+  typesTo: string[]
+}> {
   const row = await queryOne<{
     allowed_kinds: number[]
+    allowed_types: string[]
     acts_as_user_id: string | null
     status: string
-  }>('select allowed_kinds, acts_as_user_id, status from app_credentials where client_id = $1', [
-    input.clientId,
-  ])
+  }>(
+    'select allowed_kinds, allowed_types, acts_as_user_id, status from app_credentials where client_id = $1',
+    [input.clientId],
+  )
   if (!row) throw new RoleRefused('no_such_identity')
   if (row.status !== 'active') throw new RoleRefused('not_active')
 
+  const allowedTypes = input.allowedTypes ?? row.allowed_types
   await query(
-    'update app_credentials set allowed_kinds = $2, updated_at = now() where client_id = $1',
-    [input.clientId, input.allowedKinds],
+    'update app_credentials set allowed_kinds = $2, allowed_types = $3, updated_at = now() where client_id = $1',
+    [input.clientId, input.allowedKinds, allowedTypes],
   )
 
-  return { clientId: input.clientId, from: row.allowed_kinds, to: input.allowedKinds }
+  return {
+    clientId: input.clientId,
+    from: row.allowed_kinds,
+    to: input.allowedKinds,
+    typesFrom: row.allowed_types,
+    typesTo: allowedTypes,
+  }
 }
 
 /**
