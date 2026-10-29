@@ -54,6 +54,8 @@ const BUZZ = {
    * an issue (SPEC, decided by Miky 2026-10-14). Leaf owns it.
    */
   DOCUMENT: 30842,
+  /** A file saved as an upstream Buzz artifact; its `type` tag says which. */
+  ARTIFACT: 45010,
 } as const
 
 describe('seeded signing policies', () => {
@@ -199,6 +201,8 @@ describe('seeded signing policies', () => {
         BUZZ.MESSAGE_EDIT,
         // Resolving a comment's thread, as Peek does (LEAF-5).
         PEEK.ASSERTION,
+        // A file saved as an artifact, limited to a project by its type (dce43a38).
+        BUZZ.ARTIFACT,
       ].sort((a, b) => a - b),
     )
     // Never the Folder's state, which the relay signs, and never a topic: a
@@ -391,6 +395,18 @@ describe('the Folder command', () => {
     // half — SHI-1's screenshots — which is why it is not Peek-only.
     for (const client of ['estiva-peek', 'estiva-ship'] as const) {
       expect(app(client).allowedKinds).toContain(BUZZ.BLOSSOM_AUTH)
+    }
+  })
+
+  it('lets Peek, Ship and Leaf save a project as an artifact, and no other file type', () => {
+    // dce43a38: every file type shares 45010, so the type list is the grant.
+    for (const client of ['estiva-peek', 'estiva-ship', 'estiva-leaf']) {
+      expect(app(client).allowedKinds).toContain(BUZZ.ARTIFACT)
+      expect(app(client).allowedTypes).toEqual(['osnova.project'])
+    }
+    // A seeded app holding 45010 with no types would sign nothing, silently.
+    for (const seeded of SEED_APPS) {
+      if (seeded.allowedKinds.includes(BUZZ.ARTIFACT)) expect(seeded.allowedTypes).not.toEqual([])
     }
   })
 

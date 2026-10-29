@@ -997,6 +997,51 @@ describe('changing what a credential may sign', () => {
     expect(issued.allowed_kinds).toEqual([27235])
   })
 
+  it('grants a credential one file type, and it saves that type and no other', async () => {
+    // dce43a38: the agent credentials sit outside the seed, so 45010 and its
+    // types reach them only through this route.
+    const { cookie } = await signedInAs('types@estiva.test', 'admin')
+    const bot = await createRoleIdentity({ displayName: 'Saves Projects' })
+    const credential = await issueServiceCredential({
+      userId: bot.id,
+      clientId: 'saves-projects',
+      name: 'Saves Projects',
+      allowedKinds: [27235],
+    })
+    const response = await app.request(`/admin/credentials/${credential.clientId}/kinds`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ allowedKinds: [27235, 45010], allowedTypes: ['osnova.project'] }),
+    })
+    expect(response.status).toBe(200)
+
+    const { access_token, allowed_types } = (await (
+      await tokenFor(credential.clientId, credential.secret)
+    ).json()) as { access_token: string; allowed_types: string[] }
+    // Answerable before the attempt, as allowed_kinds is (PEEK-172).
+    expect(allowed_types).toEqual(['osnova.project'])
+    const save = (type: string) =>
+      app.request('/sign', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${access_token}` },
+        body: JSON.stringify({ event: { kind: 45010, tags: [['type', type]], content: '' } }),
+      })
+    expect((await save('osnova.project')).status).toBe(200)
+    const other = await save('leaf.document')
+    expect(other.status).toBe(422)
+    await expect(other.json()).resolves.toMatchObject({
+      error: { code: 'policy_violation', detail: { reason: 'type_not_allowed' } },
+    })
+
+    // Changing its kinds without naming types keeps the types it has.
+    await app.request(`/admin/credentials/${credential.clientId}/kinds`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ allowedKinds: [27235, 45010, 9] }),
+    })
+    expect((await save('osnova.project')).status).toBe(200)
+  })
+
   it('refuses a member', async () => {
     const { cookie } = await signedInAs('notadmin@estiva.test', 'member')
     const bot = await createRoleIdentity({ displayName: 'Not Yours' })

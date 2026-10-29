@@ -50,10 +50,23 @@ export const KIND_HTTP_AUTH = 27235
  */
 export const KIND_RELAY_AUTH = 22242
 
+/**
+ * An upstream Buzz artifact save (NIP-AR): every file type shares this kind and
+ * names itself in a `type` tag, so the kind alone says nothing about which file
+ * an app is saving.
+ */
+export const KIND_ARTIFACT = 45010
+
 export interface AppPolicy {
   clientId: string
   name: string
   allowedKinds: number[]
+  /**
+   * The file types this app may save as a `kind:45010`, matched exactly against
+   * the event's `type` tag. Empty refuses every type, so a credential granted
+   * 45010 without a list signs nothing.
+   */
+  allowedTypes: string[]
   nip98UrlPrefixes: string[]
   /**
    * Relays this app may answer a NIP-42 challenge from. Deliberately a separate
@@ -69,6 +82,7 @@ export type PolicyRefusalReason =
   | 'app_disabled'
   | 'kind_profile_forbidden'
   | 'kind_not_allowed'
+  | 'type_not_allowed'
   | 'nip98_missing_url'
   | 'nip98_url_not_allowed'
   | 'relay_auth_missing_relay'
@@ -138,6 +152,19 @@ export function evaluateSignPolicy(
 
   if (!app.allowedKinds.includes(event.kind)) {
     return refuse('kind_not_allowed', `App ${app.clientId} may not sign kind ${event.kind}`)
+  }
+
+  // Each app saves only the file types it is listed for; a type no app is
+  // listed for is refused everywhere.
+  // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/every-file-is-an-artifact-the-relay-keeps-in-order.md
+  if (event.kind === KIND_ARTIFACT) {
+    const type = tagValue(event, 'type')
+    if (!type || !app.allowedTypes.includes(type)) {
+      return refuse(
+        'type_not_allowed',
+        `App ${app.clientId} may not save a file of type ${type ?? '(none)'}`,
+      )
+    }
   }
 
   if (event.kind === KIND_HTTP_AUTH) {

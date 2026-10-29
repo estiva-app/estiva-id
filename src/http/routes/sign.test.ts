@@ -154,6 +154,21 @@ describe('per-app policy (PEEK-71)', () => {
     expect((await sign(peekToken, { kind: 31989, tags: [], content: '' })).status).toBe(422)
   })
 
+  it('signs a project saved as an artifact, and refuses any other file type', async () => {
+    // dce43a38, through the seeded rows: the running policy, not SEED_APPS.
+    const save = (token: string, tags: string[][]) =>
+      sign(token, { kind: 45010, tags, content: '' })
+    for (const token of [peekToken, shipToken]) {
+      expect((await save(token, [['type', 'osnova.project']])).status).toBe(200)
+      const other = await save(token, [['type', 'leaf.document']])
+      expect(other.status).toBe(422)
+      await expect(other.json()).resolves.toMatchObject({
+        error: { code: 'policy_violation', detail: { reason: 'type_not_allowed' } },
+      })
+      expect((await save(token, [])).status).toBe(422)
+    }
+  })
+
   it('refuses kind:0 for every app', async () => {
     for (const token of [peekToken, shipToken]) {
       const response = await sign(token, { kind: 0, tags: [], content: '{"name":"impostor"}' })

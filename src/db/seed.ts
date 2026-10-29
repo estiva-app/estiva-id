@@ -16,6 +16,12 @@ interface SeedApp {
   clientId: string
   name: string
   allowedKinds: number[]
+  /**
+   * The file types this app may save as a `kind:45010` (`allowed_types`):
+   * empty refuses every one. Peek, Ship and Leaf each hold `osnova.project`
+   * and nothing else for now (dce43a38's Done when).
+   */
+  allowedTypes: string[]
   nip98UrlPrefixes: string[]
   /**
    * Relays this app may answer a NIP-42 challenge from (PEE-4).
@@ -233,8 +239,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // nobody exercises is a grant nobody notices is wrong.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852, 24242, 30840, 30850,
+      40003, 1852, 24242, 30840, 30850, 45010,
     ],
+    allowedTypes: ['osnova.project'],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().PEEK_REDIRECT_URIS],
@@ -333,7 +340,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // end without this.
     allowedKinds: [
       30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
+      45010,
     ],
+    allowedTypes: ['osnova.project'],
     nip98UrlPrefixes: [],
     // The other half of 22242, and the old comment's own condition: it said the
     // reversal "cannot be a one-line unscoped grant — it has to name a relay
@@ -377,7 +386,10 @@ export const SEED_APPS: readonly SeedApp[] = [
     // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7],
+    // 45010 is a file saved as an artifact, limited to a project (dce43a38);
+    // Leaf's document stays a 30842 until it moves too.
+    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7, 45010],
+    allowedTypes: ['osnova.project'],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],
@@ -402,11 +414,12 @@ export async function seedApps(): Promise<void> {
   for (const app of SEED_APPS) {
     await query(
       `insert into app_credentials
-         (client_id, name, allowed_kinds, nip98_url_prefixes, relay_auth_urls, redirect_uris)
-       values ($1, $2, $3, $4, $5, $6)
+         (client_id, name, allowed_kinds, nip98_url_prefixes, relay_auth_urls, redirect_uris, allowed_types)
+       values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (client_id) do update
          set name = excluded.name,
              allowed_kinds = excluded.allowed_kinds,
+             allowed_types = excluded.allowed_types,
              nip98_url_prefixes = excluded.nip98_url_prefixes,
              relay_auth_urls = excluded.relay_auth_urls,
              redirect_uris = excluded.redirect_uris,
@@ -421,6 +434,7 @@ export async function seedApps(): Promise<void> {
         app.nip98UrlPrefixes.length > 0 ? app.nip98UrlPrefixes : relayPrefixes(),
         app.relayAuthUrls(),
         app.redirectUris(),
+        app.allowedTypes,
       ],
     )
   }

@@ -16,6 +16,7 @@ const PEEK: AppPolicy = {
   clientId: 'estiva-peek',
   name: 'Estiva Peek',
   allowedKinds: [9, 7, 5, 9007],
+  allowedTypes: [],
   nip98UrlPrefixes: [RELAY],
   relayAuthUrls: [],
   status: 'active',
@@ -25,6 +26,7 @@ const SHIP: AppPolicy = {
   clientId: 'estiva-ship',
   name: 'estiva-ship',
   allowedKinds: [30850, 30851, 1851, 9, 5, 31989],
+  allowedTypes: [],
   nip98UrlPrefixes: [],
   relayAuthUrls: [],
   status: 'active',
@@ -57,6 +59,30 @@ describe('kind allowlists', () => {
       allowed: false,
       reason: 'app_disabled',
     })
+  })
+})
+
+describe('a file save (45010) is limited by its type', () => {
+  const LEAF: AppPolicy = { ...SHIP, clientId: 'estiva-leaf', allowedKinds: [45010] }
+  const save = (type?: string) => event(45010, type ? [['type', type]] : [])
+
+  it('signs a type on the app’s list', () => {
+    const app = { ...LEAF, allowedTypes: ['osnova.project'] }
+    expect(evaluateSignPolicy(save('osnova.project'), app, [RELAY]).allowed).toBe(true)
+  })
+
+  it('refuses a type off the list, a save with no type, and every type when the list is empty', () => {
+    const app = { ...LEAF, allowedTypes: ['osnova.project'] }
+    for (const [policy, unsigned] of [
+      [app, save('leaf.document')],
+      [app, save()],
+      [LEAF, save('osnova.project')],
+    ] as const) {
+      expect(evaluateSignPolicy(unsigned, policy, [RELAY])).toMatchObject({
+        allowed: false,
+        reason: 'type_not_allowed',
+      })
+    }
   })
 })
 

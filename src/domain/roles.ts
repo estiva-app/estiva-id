@@ -335,23 +335,40 @@ export async function retireOwnBot(input: {
 export async function setCredentialKinds(input: {
   clientId: string
   allowedKinds: number[]
-}): Promise<{ clientId: string; from: number[]; to: number[] }> {
+  /** The file types it may save as a 45010; left as they are when absent. */
+  allowedTypes?: string[]
+}): Promise<{
+  clientId: string
+  from: number[]
+  to: number[]
+  typesFrom: string[]
+  typesTo: string[]
+}> {
   const row = await queryOne<{
     allowed_kinds: number[]
+    allowed_types: string[]
     acts_as_user_id: string | null
     status: string
-  }>('select allowed_kinds, acts_as_user_id, status from app_credentials where client_id = $1', [
-    input.clientId,
-  ])
+  }>(
+    'select allowed_kinds, allowed_types, acts_as_user_id, status from app_credentials where client_id = $1',
+    [input.clientId],
+  )
   if (!row) throw new RoleRefused('no_such_identity')
   if (row.status !== 'active') throw new RoleRefused('not_active')
 
+  const allowedTypes = input.allowedTypes ?? row.allowed_types
   await query(
-    'update app_credentials set allowed_kinds = $2, updated_at = now() where client_id = $1',
-    [input.clientId, input.allowedKinds],
+    'update app_credentials set allowed_kinds = $2, allowed_types = $3, updated_at = now() where client_id = $1',
+    [input.clientId, input.allowedKinds, allowedTypes],
   )
 
-  return { clientId: input.clientId, from: row.allowed_kinds, to: input.allowedKinds }
+  return {
+    clientId: input.clientId,
+    from: row.allowed_kinds,
+    to: input.allowedKinds,
+    typesFrom: row.allowed_types,
+    typesTo: allowedTypes,
+  }
 }
 
 /**
@@ -456,6 +473,8 @@ export interface ServiceCredential {
    * open — and because a second query would be a second chance to forget.
    */
   allowedKinds: number[]
+  /** The file types a 45010 may carry (dce43a38); read with the row, as above. */
+  allowedTypes?: string[]
 }
 
 export interface IssuedServiceCredential extends ServiceCredential {
@@ -565,11 +584,13 @@ export async function authenticateServiceCredential(
     client_secret_hash: Buffer | null
     acts_as_user_id: string | null
     allowed_kinds: number[]
+    allowed_types: string[]
     status: string
     user_status: string | null
     user_kind: string | null
   }>(
-    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.allowed_kinds, a.status,
+    `select a.client_id, a.name, a.client_secret_hash, a.acts_as_user_id, a.allowed_kinds,
+            a.allowed_types, a.status,
             u.status as user_status, u.kind as user_kind
        from app_credentials a
        left join users u on u.id = a.acts_as_user_id
@@ -600,6 +621,7 @@ export async function authenticateServiceCredential(
     name: row.name,
     actsAsUserId: row.acts_as_user_id,
     allowedKinds: row.allowed_kinds,
+    allowedTypes: row.allowed_types,
     pubkey: (await getActivePubkey(row.acts_as_user_id)) ?? null,
   }
 }
