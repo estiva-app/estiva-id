@@ -563,9 +563,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(
-      tokenResponse(issued, app, { refreshToken: redemption.refreshToken }),
-    )
+    return c.json(tokenResponse(issued, app, { refreshToken: redemption.refreshToken }))
   }
 
   /**
