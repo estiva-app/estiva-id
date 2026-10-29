@@ -1032,6 +1032,14 @@ describe('changing what a credential may sign', () => {
     await expect(other.json()).resolves.toMatchObject({
       error: { code: 'policy_violation', detail: { reason: 'type_not_allowed' } },
     })
+
+    // Changing its kinds without naming types keeps the types it has.
+    await app.request(`/admin/credentials/${credential.clientId}/kinds`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ allowedKinds: [27235, 45010, 9] }),
+    })
+    expect((await save('osnova.project')).status).toBe(200)
   })
 
   it('refuses a member', async () => {
