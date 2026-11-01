@@ -217,7 +217,7 @@ function oauthErrorResponse(c: Context<AppEnv>, error: AppError, oauth: OAuthErr
  */
 function tokenResponse(
   issued: { token: string; expiresIn: number; pubkey: string },
-  ceiling: { allowedKinds: number[]; allowedTypes?: string[] },
+  allowedKinds: number[],
   extra: { refreshToken?: string; ownerAttestation?: AuthTag } = {},
 ) {
   return {
@@ -226,9 +226,7 @@ function tokenResponse(
     expires_in: issued.expiresIn,
     pubkey: issued.pubkey,
     issuer: config().ISSUER_URL,
-    allowed_kinds: ceiling.allowedKinds,
-    // Which file types a 45010 may carry: the kind alone says nothing (dce43a38).
-    allowed_types: ceiling.allowedTypes ?? [],
+    allowed_kinds: allowedKinds,
     ...(extra.refreshToken ? { refresh_token: extra.refreshToken } : {}),
     ...(extra.ownerAttestation ? { owner_attestation: extra.ownerAttestation } : {}),
   }
@@ -473,7 +471,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, app, { refreshToken: refresh?.refreshToken }))
+    return c.json(tokenResponse(issued, app.allowedKinds, { refreshToken: refresh?.refreshToken }))
   }
 
   /**
@@ -563,7 +561,9 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, app, { refreshToken: redemption.refreshToken }))
+    return c.json(
+      tokenResponse(issued, app.allowedKinds, { refreshToken: redemption.refreshToken }),
+    )
   }
 
   /**
@@ -638,7 +638,7 @@ export function tokenRoutes(): Hono<AppEnv> {
       requestId: c.get('requestId'),
     })
 
-    return c.json(tokenResponse(issued, credential, { ownerAttestation: attestation }))
+    return c.json(tokenResponse(issued, credential.allowedKinds, { ownerAttestation: attestation }))
   }
 
   return routes
