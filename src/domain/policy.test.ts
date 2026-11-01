@@ -52,6 +52,19 @@ describe('kind allowlists', () => {
     })
   })
 
+  it('refuses a file saved as an artifact (45010) like any kind the app does not hold', () => {
+    // fdad50d9: the artifact path for files is retired, and no type tag
+    // reopens it. A project changes by 1851, which Ship holds.
+    for (const tags of [[['type', 'osnova.project']], []]) {
+      expect(evaluateSignPolicy(event(45010, tags), SHIP, [RELAY])).toMatchObject({
+        allowed: false,
+        reason: 'kind_not_allowed',
+      })
+    }
+    const change = event(1851, [['set', 'title', 'Q4', 'e'.repeat(64)]])
+    expect(evaluateSignPolicy(change, SHIP, [RELAY]).allowed).toBe(true)
+  })
+
   it('refuses everything from a disabled app', () => {
     expect(evaluateSignPolicy(event(9), { ...PEEK, status: 'disabled' }, [RELAY])).toMatchObject({
       allowed: false,
