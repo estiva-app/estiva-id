@@ -154,18 +154,30 @@ describe('per-app policy (PEEK-71)', () => {
     expect((await sign(peekToken, { kind: 31989, tags: [], content: '' })).status).toBe(422)
   })
 
-  it('signs a project saved as an artifact, and refuses any other file type', async () => {
-    // dce43a38, through the seeded rows: the running policy, not SEED_APPS.
-    const save = (token: string, tags: string[][]) =>
-      sign(token, { kind: 45010, tags, content: '' })
+  it('refuses a file saved as an artifact and signs a project’s field change, through the seeded rows', async () => {
+    // fdad50d9: a project changes by 1851 (SPEC §6.2), and 45010 is no app's.
+    const a = `30850:${'b'.repeat(64)}:p1`
+    const change = {
+      kind: 1851,
+      tags: [
+        ['a', a],
+        ['O', 'p1'],
+        ['h', 'folder-1'],
+        ['set', 'title', 'Q4', 'e'.repeat(64)],
+      ],
+      content: '',
+    }
     for (const token of [peekToken, shipToken]) {
-      expect((await save(token, [['type', 'osnova.project']])).status).toBe(200)
-      const other = await save(token, [['type', 'leaf.document']])
-      expect(other.status).toBe(422)
-      await expect(other.json()).resolves.toMatchObject({
-        error: { code: 'policy_violation', detail: { reason: 'type_not_allowed' } },
+      const save = await sign(token, {
+        kind: 45010,
+        tags: [['type', 'osnova.project']],
+        content: '',
       })
-      expect((await save(token, [])).status).toBe(422)
+      expect(save.status).toBe(422)
+      await expect(save.json()).resolves.toMatchObject({
+        error: { code: 'policy_violation', detail: { reason: 'kind_not_allowed' } },
+      })
+      expect((await sign(token, change)).status).toBe(200)
     }
   })
 
