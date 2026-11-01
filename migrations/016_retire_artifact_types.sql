@@ -8,8 +8,17 @@
 -- seeded app holds 45010. The relay keeps NIP-AR for Buzz's own uses, which
 -- never sign through `/sign`.
 --
+-- With the type list gone, a 45010 grant would sign every type, so the kind
+-- leaves every credential too, not only the seeded ones: a role or
+-- self-service credential holding it signed nothing under 015 and must not
+-- sign more now.
+--
 -- why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/a-file-is-its-fields-each-kept-in-order-by-the-relay.md
 -- ---------------------------------------------------------------------------
+
+update app_credentials
+  set allowed_kinds = array_remove(allowed_kinds, 45010), updated_at = now()
+  where 45010 = any(allowed_kinds);
 
 alter table app_credentials
   drop column allowed_types;
