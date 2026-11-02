@@ -247,11 +247,23 @@ export const SEED_APPS: readonly SeedApp[] = [
     // registered on the relay (`KIND_FILE`, `MessagesWrite`); this was the only
     // gate left. Not granted to Ship: it creates no bare files yet, and a grant
     // nobody exercises is a grant nobody notices is wrong.
+    //
+    // **9021, 9022, 9000, 9001 — a team's people (SPEC §3.3, TEA-3).** Joining
+    // and leaving a team, adding someone to it and removing someone: NIP-29's
+    // events, signed by the person who acts. The relay holds the rules (only a
+    // member adds, only owners and admins remove), so granting the kind grants
+    // no more than those rules allow. Peek only for now: it is the app that
+    // draws a team's people; Ship and Leaf only rename Folder to Team.
+    // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/anyone-may-join-an-open-team-and-only-its-members-add-or-mark.md
     allowedKinds: [
       9,
       7,
       5,
       9007,
+      9021,
+      9022,
+      9000,
+      9001,
       27235,
       1851,
       9101,
