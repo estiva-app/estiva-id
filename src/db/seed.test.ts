@@ -291,13 +291,6 @@ describe('seeded signing policies', () => {
     expect(app('estiva-ship').allowedKinds).not.toContain(BUZZ.BARE_FILE)
   })
 
-  it('lets every app sign a named type’s first record, because installing an app grants it', () => {
-    // ALO-11: an app defines which files it needs and the owner decides which
-    // apps are installed (Miky, 2 Nov), so the kind is every app's, not the
-    // first one to write a named type.
-    for (const seeded of SEED_APPS) expect(seeded.allowedKinds).toContain(BUZZ.NAMED_FIRST_RECORD)
-  })
-
   it('no longer seeds the retired linear-lite credential', () => {
     // Phase 3 of PEEK-98. Leaving it here would mean the next re-seed
     // recreating the row somebody deleted on the box.

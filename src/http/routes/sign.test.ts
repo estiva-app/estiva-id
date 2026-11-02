@@ -181,6 +181,30 @@ describe('per-app policy (PEEK-71)', () => {
     }
   })
 
+  it('signs a named type’s first record for every installed app, through the seeded rows', async () => {
+    // ALO-11: an app defines which files it needs and the owner decides which
+    // apps are installed (Miky, 2 Nov), so every app may start a file of a
+    // named type (SPEC §6.1), not only the first one that wrote one.
+    const leafToken = (await issueToken({ pubkey: ada.pubkey, clientId: 'estiva-leaf' })).token
+    const first = {
+      kind: 30852,
+      tags: [
+        ['d', '0f6d2c1e-4c1a-4a0e-9d55-6a1f0c1b2d3e'],
+        ['k', 'acme.invoice'],
+        ['h', 'folder-1'],
+        ['set', 'title', 'March'],
+      ],
+      content: '',
+    }
+    for (const token of [peekToken, shipToken, leafToken]) {
+      const response = await sign(token, first)
+      expect(response.status).toBe(200)
+      const { event } = (await response.json()) as { event: Parameters<typeof verifyEvent>[0] }
+      expect(event.kind).toBe(30852)
+      expect(verifyEvent(event)).toBe(true)
+    }
+  })
+
   it('refuses kind:0 for every app', async () => {
     for (const token of [peekToken, shipToken]) {
       const response = await sign(token, { kind: 0, tags: [], content: '{"name":"impostor"}' })
