@@ -48,6 +48,22 @@ interface SeedApp {
  */
 const relayPrefixes = (): string[] => [...config().SIGN_NIP98_ALLOWED_URL_PREFIXES]
 
+/**
+ * Kinds every Estiva app gets because it is installed, not because a ticket
+ * needed them — on a different footing from each app's own list below, where
+ * every kind was added for the feature that wrote it.
+ *
+ * Only 30852, a named type's first record (SPEC §6.1): every type but the four
+ * base ones starts on it, and the relay refuses one with no `k`, two, or a base
+ * type's. An app defines which files it needs, and the workspace's owner or
+ * admin decides which apps are installed, so every app may start a file of a
+ * type it defines (Miky, 2 Nov 2026, ALO-11; record
+ * an-app-defines-the-files-it-needs-and-the-owner-installs-it, estiva-app/estiva-docs#376).
+ * Whether installing grants any other kind is not decided: add nothing here
+ * without asking.
+ */
+export const EVERY_INSTALLED_APP: readonly number[] = [30852]
+
 export const SEED_APPS: readonly SeedApp[] = [
   {
     clientId: 'estiva-peek',
@@ -232,8 +248,28 @@ export const SEED_APPS: readonly SeedApp[] = [
     // gate left. Not granted to Ship: it creates no bare files yet, and a grant
     // nobody exercises is a grant nobody notices is wrong.
     allowedKinds: [
-      9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852, 24242, 30840, 30850,
+      9,
+      7,
+      5,
+      9007,
+      27235,
+      1851,
+      9101,
+      9002,
+      9008,
+      1111,
+      30078,
+      41010,
+      41011,
+      41012,
+      22242,
+      30851,
+      40003,
+      1852,
+      24242,
+      30840,
+      30850,
+      ...EVERY_INSTALLED_APP,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
@@ -332,7 +368,23 @@ export const SEED_APPS: readonly SeedApp[] = [
     // refuses a REQ before auth outright, so none of it can be proved end to
     // end without this.
     allowedKinds: [
-      30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
+      30850,
+      30851,
+      1851,
+      9,
+      5,
+      9007,
+      9002,
+      31989,
+      27235,
+      1111,
+      30078,
+      7,
+      40003,
+      1852,
+      24242,
+      22242,
+      ...EVERY_INSTALLED_APP,
     ],
     nip98UrlPrefixes: [],
     // The other half of 22242, and the old comment's own condition: it said the
@@ -377,7 +429,20 @@ export const SEED_APPS: readonly SeedApp[] = [
     // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7],
+    allowedKinds: [
+      27235,
+      22242,
+      30842,
+      1852,
+      1851,
+      1111,
+      40003,
+      5,
+      24242,
+      9101,
+      7,
+      ...EVERY_INSTALLED_APP,
+    ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],
