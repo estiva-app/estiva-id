@@ -231,9 +231,18 @@ export const SEED_APPS: readonly SeedApp[] = [
     // registered on the relay (`KIND_FILE`, `MessagesWrite`); this was the only
     // gate left. Not granted to Ship: it creates no bare files yet, and a grant
     // nobody exercises is a grant nobody notices is wrong.
+    //
+    // **30852 — a named type's first record (SPEC §6.1), granted to every app
+    // at once, and on a different footing from every kind above.** Each of
+    // those was added for the ticket that needed it. This one is granted
+    // because the app is installed: an app defines which files it needs, and
+    // the workspace's owner or admin decides which apps are installed (Miky,
+    // 2 Nov, ALO-11; the record is estiva-docs#376). This seed stands in for
+    // that install step until Estiva ID has one, so the kind goes to Ship, Peek
+    // and Leaf together, not to whichever writes a named type first.
     allowedKinds: [
       9, 7, 5, 9007, 27235, 1851, 9101, 9002, 9008, 1111, 30078, 41010, 41011, 41012, 22242, 30851,
-      40003, 1852, 24242, 30840, 30850,
+      40003, 1852, 24242, 30840, 30850, 30852,
     ],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
@@ -331,8 +340,11 @@ export const SEED_APPS: readonly SeedApp[] = [
     // 34 live against production. PER-3 is Ship adopting it, and the relay
     // refuses a REQ before auth outright, so none of it can be proved end to
     // end without this.
+    //
+    // 30852, a named type's first record: every installed app, see Peek's.
     allowedKinds: [
       30850, 30851, 1851, 9, 5, 9007, 9002, 31989, 27235, 1111, 30078, 7, 40003, 1852, 24242, 22242,
+      30852,
     ],
     nip98UrlPrefixes: [],
     // The other half of 22242, and the old comment's own condition: it said the
@@ -377,7 +389,8 @@ export const SEED_APPS: readonly SeedApp[] = [
     // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
-    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7],
+    // 30852, a named type's first record: every installed app, see Peek's.
+    allowedKinds: [27235, 22242, 30842, 1852, 1851, 1111, 40003, 5, 24242, 9101, 7, 30852],
     nip98UrlPrefixes: [],
     relayAuthUrls: () => [...config().SIGN_RELAY_AUTH_ALLOWED_URLS],
     redirectUris: () => [...config().LEAF_REDIRECT_URIS],

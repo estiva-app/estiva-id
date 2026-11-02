@@ -54,6 +54,11 @@ const BUZZ = {
    * an issue (SPEC, decided by Miky 2026-10-14). Leaf owns it.
    */
   DOCUMENT: 30842,
+  /**
+   * A named type's first record (SPEC §6.1): every type but the four base
+   * ones starts here, with exactly one `k`.
+   */
+  NAMED_FIRST_RECORD: 30852,
 } as const
 
 describe('seeded signing policies', () => {
@@ -199,6 +204,8 @@ describe('seeded signing policies', () => {
         BUZZ.MESSAGE_EDIT,
         // Resolving a comment's thread, as Peek does (LEAF-5).
         PEEK.ASSERTION,
+        // A named type's first record, as every installed app (ALO-11).
+        BUZZ.NAMED_FIRST_RECORD,
       ].sort((a, b) => a - b),
     )
     // Never the Folder's state, which the relay signs, and never a topic: a
@@ -282,6 +289,13 @@ describe('seeded signing policies', () => {
     // decision rather than a drift.
     expect(app('estiva-peek').allowedKinds).toContain(BUZZ.BARE_FILE)
     expect(app('estiva-ship').allowedKinds).not.toContain(BUZZ.BARE_FILE)
+  })
+
+  it('lets every app sign a named type’s first record, because installing an app grants it', () => {
+    // ALO-11: an app defines which files it needs and the owner decides which
+    // apps are installed (Miky, 2 Nov), so the kind is every app's, not the
+    // first one to write a named type.
+    for (const seeded of SEED_APPS) expect(seeded.allowedKinds).toContain(BUZZ.NAMED_FIRST_RECORD)
   })
 
   it('no longer seeds the retired linear-lite credential', () => {
