@@ -95,11 +95,12 @@ export function buildProfile(
   pubkey: string,
   createdAtSeconds: number,
   fields: ProfileFields,
+  tags: NostrTag[] = [],
 ): UnsignedEvent {
   const present = Object.entries(fields).filter(([, value]) => value !== undefined && value !== '')
   present.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   const content = `{${present
     .map(([key, value]) => `${JSON.stringify(key)}:${JSON.stringify(value)}`)
     .join(',')}}`
-  return { pubkey, created_at: createdAtSeconds, kind: KIND_PROFILE, tags: [], content }
+  return { pubkey, created_at: createdAtSeconds, kind: KIND_PROFILE, tags, content }
 }

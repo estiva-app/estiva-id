@@ -1,5 +1,6 @@
 /**
- * Republish every active role account's kind:0, now carrying `"bot": true` (REM-3).
+ * Republish every active role account's kind:0, now carrying `"bot": true` (REM-3)
+ * and, on an agent a person owns, that owner's NIP-OA `auth` tag (PEE-79).
  *
  *   pnpm roles:republish            # who would be republished
  *   APPLY=1 pnpm roles:republish    # publish
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
     return
   }
 
-  out(`${rows.length} role account${rows.length === 1 ? '' : 's'} to republish with "bot": true:`)
+  out(`${rows.length} role account${rows.length === 1 ? '' : 's'} to republish (bot marker, and owner tag where owned):`)
   for (const row of rows) out(`  ${row.display_name ?? row.id}`)
   out()
 
