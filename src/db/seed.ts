@@ -379,7 +379,12 @@ export const SEED_APPS: readonly SeedApp[] = [
     // 34 live against production. PER-3 is Ship adopting it, and the relay
     // refuses a REQ before auth outright, so none of it can be proved end to
     // end without this.
+    //
+    // 9101 resolves or reopens a comment's thread, the same assertion Peek and
+    // Leaf write, so one Resolve works in every app (ONE-8; record
+    // anyone-who-may-comment-resolves-or-reopens-a-thread-and-the-newest-counts).
     allowedKinds: [
+      9101,
       30850,
       30851,
       1851,
