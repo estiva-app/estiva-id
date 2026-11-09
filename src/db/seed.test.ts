@@ -103,6 +103,15 @@ describe('seeded signing policies', () => {
     }
   })
 
+  it('lets every app that draws a thread resolve and reopen it', () => {
+    // One Resolve in Peek, Ship and Leaf (ONE-8): a thread resolved in one reads
+    // resolved in the others, so an app without 9101 offers a Resolve that is
+    // refused at /sign.
+    for (const client of ['estiva-peek', 'estiva-ship', 'estiva-leaf']) {
+      expect(app(client).allowedKinds).toContain(PEEK.ASSERTION)
+    }
+  })
+
   it('lets Peek sign the object kinds the apps it acts on declare creatable', () => {
     /*
       PRO-4 made object-creating actions renderable, so Peek draws Ship's
