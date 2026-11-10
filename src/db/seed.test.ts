@@ -215,6 +215,8 @@ describe('seeded signing policies', () => {
         PEEK.ASSERTION,
         // A named type's first record, as every installed app (ALO-11).
         BUZZ.NAMED_FIRST_RECORD,
+        // The mute list Join takes a topic off, as in Ship and Peek (TOPI-4).
+        30078,
       ].sort((a, b) => a - b),
     )
     // Never the Folder's state, which the relay signs, and never a topic: a

@@ -446,6 +446,9 @@ export const SEED_APPS: readonly SeedApp[] = [
     // cannot tell them apart): media GET is authenticated, so a document cannot
     // show an attachment without it, nor add one. Each kind Leaf adds to its `KINDS` has to be added here too, or its
     // first save is refused at /sign after every screen has worked.
+    // 30078 is the person's mute list (NIP-78, encrypted to them): Join on Leaf's Explore topics takes a topic you
+    // muted off it, as Join in Ship and Peek does (TOPI-4; Miky, at its kickoff, 10 November). Read state lives in the
+    // same kind, so Leaf could write it too, as Peek and Ship do; Leaf has no read state of its own yet.
     allowedKinds: [
       27235,
       22242,
@@ -458,6 +461,7 @@ export const SEED_APPS: readonly SeedApp[] = [
       24242,
       9101,
       7,
+      30078,
       ...EVERY_INSTALLED_APP,
     ],
     nip98UrlPrefixes: [],
