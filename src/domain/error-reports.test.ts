@@ -91,6 +91,18 @@ describe('scrubMessage', () => {
     expect(scrubMessage(raw)).toBe(expected)
   })
 
+  // Shapes the faster patterns must still catch, as the old ones did (second review of #98).
+  it.each([
+    ['Load failed -https://peek.estiva.app/t/planted-visit', 'Load failed <url>'],
+    ['see .http://planted.example/x y', 'see <url>'],
+    ['+ftp://planted/notes', '<url>'],
+    ['mail planted@@example.com now', 'mail <address> now'],
+    ['to planted@corp@example.com now', 'to <address> now'],
+    ['Expected @ at line 3.', 'Expected @ at line 3.'],
+  ])('cleans %s', (raw, expected) => {
+    expect(scrubMessage(raw)).toBe(expected)
+  })
+
   it('caps a long message at 200 characters', () => {
     expect(scrubMessage('word '.repeat(100)).length).toBe(200)
   })

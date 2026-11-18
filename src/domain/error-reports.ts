@@ -105,10 +105,10 @@ export function scrubMessage(raw: unknown): string {
     )
     // A web address runs to the end: one with a space in it would leave the rest behind.
     // Starts only where a run of scheme letters does: from every dot of `a.a.a…` it cost the square of the length.
-    .replace(/(?<![a-z0-9+.-])[a-z0-9][a-z0-9+.-]*:\/\/.*$/is, '<url>')
+    .replace(/(?<![a-z0-9+.-])[a-z0-9+.-]*:\/\/.*$/is, '<url>')
     // Starts only where a word does, and no part of it spans an @: `\S+@\S+` tried from every
     // letter of a long word costs the square of its length (614 ms at 32 KB, on the one thread).
-    .replace(/(?<![^\s@])[^\s@]+@[^\s@]+\.\S+/g, '<address>')
+    .replace(/(?<!\S)[^\s@]*@\S*\.\S*/g, '<address>')
     .replace(/\b(npub|nsec|note|nevent|naddr|nprofile|nrelay)1[0-9a-z]+/gi, '<id>')
     // A key, event id or token has digits; a long code name (`useLiveTopicSubscription`) has none.
     .replace(/[A-Za-z0-9+/=_-]{16,}/g, (run) => (/\d/.test(run) ? '<id>' : run))
