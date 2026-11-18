@@ -103,7 +103,6 @@ export type Failure =
   | 'not-saved'
   | 'not-loaded'
   | 'not-reached'
-  | 'unnamed'
 
 const handledSeen = new Set<string>()
 

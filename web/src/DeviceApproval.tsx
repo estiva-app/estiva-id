@@ -14,6 +14,7 @@
 import { startAuthentication } from '@simplewebauthn/browser'
 import { useEffect, useState } from 'react'
 import {
+  ApiError,
   type DeviceRequest,
   approveDeviceRequest,
   denyDeviceRequest,
@@ -25,7 +26,7 @@ import { ErrorNotice } from './errorReports'
 type State =
   | { kind: 'loading' }
   | { kind: 'enter' }
-  | { kind: 'missing'; message: string }
+  | { kind: 'missing'; message: string; reached: boolean }
   | { kind: 'ready'; request: DeviceRequest }
   | { kind: 'approved'; botName: string }
   | { kind: 'denied' }
@@ -45,6 +46,8 @@ export function DeviceApproval({ initialCode }: { initialCode: string | null }) 
       setState({
         kind: 'missing',
         message: failure instanceof Error ? failure.message : 'That code is not valid.',
+        // The server answered (a code it does not know); anything else is the server not reached.
+        reached: failure instanceof ApiError && failure.status < 500,
       })
     }
   }
@@ -98,7 +101,7 @@ export function DeviceApproval({ initialCode }: { initialCode: string | null }) 
             }}
           >
             {state.kind === 'missing' && (
-              <ErrorNotice as="p" failure="link-not-valid">
+              <ErrorNotice as="p" failure={state.reached ? 'link-not-valid' : 'not-reached'}>
                 {state.message}
               </ErrorNotice>
             )}
