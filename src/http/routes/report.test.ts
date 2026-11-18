@@ -10,7 +10,6 @@ import { issueToken } from '../../domain/jwt.js'
 import { createUserWithKey } from '../../domain/users.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
 import { createApp } from '../app.js'
-import { resetReportRateLimitForTests } from './report.js'
 
 const ORIGIN = 'http://localhost:5190'
 const DSN = 'https://abc123@o1.ingest.de.sentry.io/42'
@@ -46,7 +45,13 @@ function report(token: string | undefined, body: unknown, headers: Record<string
 const sentEnvelopes = () => sentry.mock.calls.map((call) => String((call[1] as RequestInit).body))
 const sentEvent = () => JSON.parse(sentEnvelopes()[0]?.split('\n')[2] ?? 'null')
 
-const crash = {
+/**
+ * The rate limits keep their windows in process memory, so each test runs two
+ * hours after the last on a fake clock: no test spends another's budget.
+ */
+let clock = Date.now()
+
+const makeCrash = () => ({
   release: 'ded93b9c',
   how: 'boundary',
   error: {
@@ -55,6 +60,7 @@ const crash = {
     frames: [
       { function: 'parseBody', file: `${ORIGIN}/assets/index-Ab12.js`, line: 1, column: 4567 },
       { function: 'render', file: `${ORIGIN}/app/teams/${PLANTED_ADDRESS}`, line: 3, column: 9 },
+      { function: 'plantedmessage quarterly numbers', file: `${ORIGIN}/assets/index-Ab12.js` },
       { function: 'inject', file: 'https://elsewhere.example/assets/x.js', line: 1, column: 1 },
     ],
   },
@@ -62,8 +68,9 @@ const crash = {
   trail: [
     { at: Date.now() - 5_000, screen: '/app/desk' },
     { at: Date.now() - 4_000, screen: `/t/${PLANTED_ADDRESS}` },
-    { at: Date.now() - 3_000, action: 'opened-message' },
-    { at: Date.now() - 2_000, action: PLANTED_TITLE },
+    { at: Date.now() - 3_000, action: 'sent-message' },
+    { at: Date.now() - 2_000, action: PLANTED_TITLE.replaceAll(' ', '-') },
+    { at: Date.now() - 1_000, screen: '/search/plantedtitle/board' },
   ],
   // Fields outside the list, as a careless or older reporter might send them.
   pubkey: 'f'.repeat(64),
@@ -71,7 +78,8 @@ const crash = {
   title: PLANTED_TITLE,
   user: { ip_address: '203.0.113.7', email: 'ada@example.test' },
   request: { url: `${ORIGIN}/t/${PLANTED_ADDRESS}` },
-}
+})
+let crash: ReturnType<typeof makeCrash>
 
 beforeAll(async () => {
   process.env.SENTRY_DSNS = `estiva-peek=${DSN}`
@@ -81,8 +89,11 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  clock += 2 * 60 * 60_000
+  vi.setSystemTime(clock)
+  crash = makeCrash()
   await truncateAll()
-  resetReportRateLimitForTests()
   await query('update app_credentials set redirect_uris = $1 where client_id = $2', [
     [`${ORIGIN}/auth/callback`],
     'estiva-peek',
@@ -98,6 +109,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 afterAll(async () => {
@@ -184,9 +196,15 @@ describe('POST /report', () => {
     expect(exception.value).toBe('Unexpected token … is not valid JSON')
     expect(exception.mechanism).toEqual({ type: 'react.errorboundary', handled: false })
     // Oldest call first, as Sentry reads them.
+    // A frame outside our bundles keeps no name, and a name that is not code is dropped.
     expect(exception.stacktrace.frames).toEqual([
-      { function: 'inject', abs_path: '<other>', filename: '<other>', in_app: false },
-      { function: 'render', abs_path: '<other>', filename: '<other>', in_app: false },
+      { abs_path: '<other>', filename: '<other>', in_app: false },
+      {
+        abs_path: `${ORIGIN}/assets/index-Ab12.js`,
+        filename: `${ORIGIN}/assets/index-Ab12.js`,
+        in_app: true,
+      },
+      { abs_path: '<other>', filename: '<other>', in_app: false },
       {
         function: 'parseBody',
         abs_path: `${ORIGIN}/assets/index-Ab12.js`,
@@ -201,7 +219,13 @@ describe('POST /report', () => {
   it('keeps the steps before the error that are screens and named actions', async () => {
     await report(personToken, crash)
     const steps = sentEvent().breadcrumbs.values.map((step: { message: string }) => step.message)
-    expect(steps).toEqual(['opened /app/desk', 'opened-message'])
+    expect(steps).toEqual(['opened /app/desk', 'sent-message'])
+  })
+
+  it('sends a screen as <unknown> when it is not one of the app’s routes', async () => {
+    await report(personToken, { ...crash, screen: '/search/plantedtitle/board' })
+    expect(sentEvent().tags.screen).toBe('<unknown>')
+    expect(sentEnvelopes()[0]).not.toContain('plantedtitle')
   })
 
   it('sends the same release it was given, so Sentry can tell versions apart', async () => {
@@ -223,6 +247,22 @@ describe('POST /report', () => {
     const refused = await report(personToken, crash)
     expect(refused.status).toBe(429)
     expect(sentry).toHaveBeenCalledTimes(30)
+  })
+
+  it('stops an app at 100 reports an hour, across everyone', async () => {
+    const tokens = await Promise.all(
+      [1, 2, 3, 4].map(async (n) => {
+        const { pubkey } = await createUserWithKey({ email: `p${n}@example.test` })
+        return (await issueToken({ pubkey, clientId: 'estiva-peek' })).token
+      }),
+    )
+    const statuses: number[] = []
+    for (const token of tokens) {
+      for (let i = 0; i < 26; i++) statuses.push((await report(token, crash)).status)
+    }
+    expect(statuses.filter((s) => s === 202)).toHaveLength(100)
+    expect(statuses.slice(100)).toEqual([429, 429, 429, 429])
+    expect(sentry).toHaveBeenCalledTimes(100)
   })
 
   it('accepts and drops a report from an app with no Sentry address', async () => {

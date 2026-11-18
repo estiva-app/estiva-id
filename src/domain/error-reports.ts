@@ -67,11 +67,21 @@ export function scrubMessage(raw: unknown): string {
   if (typeof raw !== 'string') return ''
   let text = raw.replace(/\p{Cc}+/gu, ' ')
 
-  const first = text.search(QUOTES)
+  // An apostrophe inside a word (Firefox's "can't access property") is wording, not a quote.
+  const isQuote = (i: number) =>
+    QUOTES.test(text[i] as string) &&
+    !(/\p{L}/u.test(text[i - 1] ?? '') && /\p{L}/u.test(text[i + 1] ?? ''))
+  let first = -1
+  for (let i = 0; i < text.length; i++) {
+    if (isQuote(i)) {
+      first = i
+      break
+    }
+  }
   if (first >= 0) {
     let last = -1
     for (let i = text.length - 1; i > first; i--) {
-      if (QUOTES.test(text[i] as string)) {
+      if (isQuote(i)) {
         last = i
         break
       }
@@ -80,8 +90,20 @@ export function scrubMessage(raw: unknown): string {
   }
 
   text = text
-    .replace(/^(URL constructor: ).*( is not a valid URL\.?)$/s, '$1…$2')
-    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*/gi, '<url>')
+    // Wordings that name their input without quotes keep only their own words.
+    // Firefox: "URL constructor: X is …", "Window.fetch: X is …"; the API's name is kept.
+    .replace(
+      /^(?:(URL constructor|[A-Z][A-Za-z]*\.[A-Za-z]+): )?.* is not a valid URL\.?$/s,
+      (_all, api: string | undefined) =>
+        api ? `${api}: … is not a valid URL.` : '… is not a valid URL.',
+    )
+    .replace(/\b(Failed to parse URL from|Invalid regular expression:|Invalid URL:)\s.*$/s, '$1 …')
+    .replace(
+      /^Cannot convert .* to an? (BigInt|Symbol|number|string|object|primitive value)\b.*$/s,
+      'Cannot convert … to a $1',
+    )
+    // A web address runs to the end: one with a space in it would leave the rest behind.
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/.*$/is, '<url>')
     .replace(/\S+@\S+\.\S+/g, '<address>')
     .replace(/\b(npub|nsec|note|nevent|naddr|nprofile|nrelay)1[0-9a-z]+/gi, '<id>')
     // A key, event id or token has digits; a long code name (`useLiveTopicSubscription`) has none.
@@ -92,22 +114,61 @@ export function scrubMessage(raw: unknown): string {
   return text.length > MAX_MESSAGE ? `${text.slice(0, MAX_MESSAGE - 1)}…` : text
 }
 
-const SCREEN_SEGMENT = /^(:[A-Za-z]{1,24}|[a-z]{1,24})$/
-
 /**
- * A route pattern: `/`, `/app/teams/:id`. Literal segments are lowercase words
- * only, so an address that slipped in (`/t/quality-catch-it-5a1…`) is refused.
+ * Each app's screens, as its router names them. A screen not listed here is
+ * sent as `<unknown>`: an app that adds a route adds it here, and until then
+ * loses only the name of the screen, never leaks an address.
  */
-export function readScreen(raw: unknown): string | undefined {
-  if (typeof raw !== 'string' || raw.length > 100 || !raw.startsWith('/')) return undefined
-  if (raw === '/') return raw
-  const segments = raw.slice(1).replace(/\/$/, '').split('/')
-  if (segments.length > 6 || !segments.every((s) => SCREEN_SEGMENT.test(s))) return undefined
-  return raw
+const SCREENS: Record<string, ReadonlySet<string>> = {
+  'estiva-peek': new Set([
+    '/',
+    '/:word/:ref',
+    '/app',
+    '/app/desk',
+    '/app/dms',
+    '/app/dms/:id',
+    '/app/folders',
+    '/app/folders/:id',
+    '/app/folders/:id/chat',
+    '/app/initiatives',
+    '/app/initiatives/explore',
+    '/app/people',
+    '/app/people/:id',
+    '/app/teams',
+    '/app/teams/:id',
+    '/app/teams/:id/chat',
+    '/app/topics',
+    '/app/topics/explore',
+    '/auth/callback',
+    '/desk',
+    '/folders',
+    '/folders/:id',
+    '/folders/:id/chat',
+    '/message/:ref',
+    '/o/:ref',
+    '/people',
+    '/people/:id',
+    '/topic-old/:ref',
+    '/topics',
+    '/topics/:id',
+  ]),
 }
 
-const ACTION = /^[a-z][a-z-]{1,39}$/
-const FUNCTION_NAME = /^[A-Za-z0-9_$.<>[\] ]{1,100}$/
+/**
+ * Our own named actions, the only words a step may carry besides a screen
+ * (Decided: "kinds of screen and our own named actions only"). Adding one is
+ * a change to the list, reviewed as one.
+ */
+const ACTIONS: ReadonlySet<string> = new Set(['sent-message', 'write-refused'])
+
+/** A route pattern the app is known to have: `/app/teams/:id`, never an address. */
+export function readScreen(app: string, raw: unknown): string | undefined {
+  return typeof raw === 'string' && SCREENS[app]?.has(raw) ? raw : undefined
+}
+
+/** A function as a stack names it: `parseBody`, `Object.<anonymous>`, `new Foo`, `async run`. */
+const FUNCTION_NAME =
+  /^(?:new |async )?[A-Za-z_$<][\w$<>]{0,60}(?:\.[A-Za-z_$<][\w$<>]{0,60}){0,4}$/
 const ASSET_PATH = /^\/assets\/[A-Za-z0-9_.-]{1,100}\.m?js$/
 const RELEASE = /^[0-9a-f]{7,40}$/
 const TYPE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/
@@ -134,7 +195,8 @@ function readFrame(raw: unknown, appOrigin: string | undefined): ReportFrame | u
   }
   const kept = absPath !== '<other>'
   return {
-    ...(typeof frame.function === 'string' && FUNCTION_NAME.test(frame.function)
+    // A frame outside our bundles keeps no name either: it is not our code's word.
+    ...(kept && typeof frame.function === 'string' && FUNCTION_NAME.test(frame.function)
       ? { function: frame.function }
       : {}),
     absPath,
@@ -145,14 +207,14 @@ function readFrame(raw: unknown, appOrigin: string | undefined): ReportFrame | u
   }
 }
 
-function readStep(raw: unknown, now: number): ReportStep | undefined {
+function readStep(app: string, raw: unknown, now: number): ReportStep | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const step = raw as Record<string, unknown>
   const at = intIn(step.at, Number.MAX_SAFE_INTEGER)
   if (at === undefined || at > now + 60_000 || at < now - TRAIL_MAX_AGE_MS) return undefined
-  const screen = readScreen(step.screen)
+  const screen = readScreen(app, step.screen)
   if (screen) return { at, screen }
-  if (typeof step.action === 'string' && ACTION.test(step.action))
+  if (typeof step.action === 'string' && ACTIONS.has(step.action))
     return { at, action: step.action }
   return undefined
 }
@@ -165,9 +227,11 @@ export function readBrowser(userAgent: string | undefined): ErrorReport['browser
     return match ? { name, version: match[1] as string } : undefined
   }
   return (
-    pick('Edge', /\bEdg\/(\d{1,4})/) ??
-    pick('Firefox', /\bFirefox\/(\d{1,4})/) ??
-    pick('Chrome', /\bChrome\/(\d{1,4})/) ??
+    pick('Edge', /\bEdg(?:A|iOS)?\/(\d{1,4})/) ??
+    pick('Opera', /\bOPR\/(\d{1,4})/) ??
+    pick('Samsung Internet', /\bSamsungBrowser\/(\d{1,4})/) ??
+    pick('Firefox', /\b(?:Firefox|FxiOS)\/(\d{1,4})/) ??
+    pick('Chrome', /\b(?:Chrome|CriOS)\/(\d{1,4})/) ??
     pick('Safari', /\bVersion\/(\d{1,4})[^ ]* (?:Mobile\/\S+ )?Safari\//) ?? { name: 'Other' }
   )
 }
@@ -216,7 +280,7 @@ export function rebuildReport(
 
   const trail = (Array.isArray(input.trail) ? input.trail : [])
     .slice(-MAX_TRAIL)
-    .map((step) => readStep(step, known.now))
+    .map((step) => readStep(known.app, step, known.now))
     .filter((step): step is ReportStep => step !== undefined)
 
   return {
@@ -227,7 +291,7 @@ export function rebuildReport(
     type: typeof error.type === 'string' && TYPE.test(error.type) ? error.type : 'Error',
     message: scrubMessage(error.message),
     frames,
-    screen: readScreen(input.screen) ?? '<unknown>',
+    screen: readScreen(known.app, input.screen) ?? '<unknown>',
     browser: readBrowser(known.userAgent),
     pubkey: known.pubkey,
     account: known.account,

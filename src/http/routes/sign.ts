@@ -57,6 +57,7 @@ import { evaluateSignPolicy } from '../../domain/policy.js'
 import { badRequest, forbidden, policyViolation, unauthenticated } from '../../errors.js'
 import { signEvent } from '../../nostr/keys.js'
 import type { AppEnv } from '../app.js'
+import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
 
 const unsignedEventSchema = z.object({
@@ -69,13 +70,6 @@ const unsignedEventSchema = z.object({
 })
 
 const signRequestSchema = z.object({ event: unsignedEventSchema })
-
-function bearerToken(header: string | undefined): string {
-  if (!header?.startsWith('Bearer ')) throw unauthenticated('Expected a Bearer token')
-  const token = header.slice('Bearer '.length).trim()
-  if (!token) throw unauthenticated('Empty Bearer token')
-  return token
-}
 
 export function signRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()

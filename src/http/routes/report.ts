@@ -17,6 +17,7 @@
  * the allowlist is the registered redirect URIs (`http/cors.ts`).
  */
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import {
   accountKind,
   rebuildReport,
@@ -24,8 +25,9 @@ import {
   sentryDsnFor,
 } from '../../domain/error-reports.js'
 import { verifyToken } from '../../domain/jwt.js'
-import { badRequest, rateLimited, unauthenticated } from '../../errors.js'
+import { badRequest, rateLimited } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
 import { createRateLimiter } from '../rate-limit.js'
 
@@ -42,29 +44,33 @@ const REPORTS_PER_WINDOW = 30
 const WINDOW_MS = 10 * 60_000
 const limiter = createRateLimiter(REPORTS_PER_WINDOW, WINDOW_MS)
 
-/** Test seam. */
-export const resetReportRateLimitForTests = () => limiter.reset()
-
-function bearerToken(header: string | undefined): string {
-  if (!header?.startsWith('Bearer ')) throw unauthenticated('Expected a Bearer token')
-  const token = header.slice('Bearer '.length).trim()
-  if (!token) throw unauthenticated('Empty Bearer token')
-  return token
-}
+/**
+ * Per app, across everyone: a few accounts in a loop must not use up Sentry's
+ * free month (5,000), so no app sends more than 100 an hour.
+ */
+const APP_REPORTS_PER_HOUR = 100
+const appLimiter = createRateLimiter(APP_REPORTS_PER_HOUR, 60 * 60_000)
 
 export function reportRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
   routes.options('/report', preflight('POST, OPTIONS', 'authorization, content-type'))
 
-  routes.post('/report', async (c) => {
+  // Counted on the stream, in bytes, so an oversized body is refused before it is read.
+  const sizeCap = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: () => {
+      throw badRequest('Report too large')
+    },
+  })
+
+  routes.post('/report', sizeCap, async (c) => {
     const allowed = await allowOrigin(c)
     const { pubkey, clientId, delegate } = await verifyToken(
       bearerToken(c.req.header('authorization')),
     )
 
     const raw = await c.req.text()
-    if (raw.length > MAX_BODY_BYTES) throw badRequest('Report too large')
     let body: unknown
     try {
       body = JSON.parse(raw)
@@ -72,7 +78,9 @@ export function reportRoutes(): Hono<AppEnv> {
       throw badRequest('Expected a JSON report')
     }
 
-    const budget = limiter.check(`${clientId}:${pubkey}`)
+    // The person's budget first, so one person's loop does not spend the app's.
+    const personBudget = limiter.check(`${clientId}:${pubkey}`)
+    const budget = personBudget.allowed ? appLimiter.check(clientId) : personBudget
     if (!budget.allowed) {
       c.header('retry-after', String(budget.retryAfterSeconds))
       throw rateLimited('Too many error reports', {
