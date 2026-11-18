@@ -20,6 +20,7 @@ import { inviteRoutes } from './routes/invites.js'
 import { logoutRoutes } from './routes/logout.js'
 import { nip44Routes } from './routes/nip44.js'
 import { profileRoutes } from './routes/profile.js'
+import { reportRoutes } from './routes/report.js'
 import { signRoutes } from './routes/sign.js'
 import { testLoginRoutes } from './routes/test-login.js'
 import { tokenRoutes } from './routes/tokens.js'
@@ -81,6 +82,7 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', deviceRoutes())
   app.route('/', testLoginRoutes())
   app.route('/', signRoutes())
+  app.route('/', reportRoutes())
   app.route('/', nip44Routes())
   app.route('/', profileRoutes())
   app.route('/', avatarRoutes())

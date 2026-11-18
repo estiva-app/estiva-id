@@ -236,6 +236,16 @@ const schema = z.object({
   PEEK_REDIRECT_URIS: commaSeparated,
   SHIP_REDIRECT_URIS: commaSeparated,
   LEAF_REDIRECT_URIS: commaSeparated,
+
+  /**
+   * Where each app's error reports go (`POST /report`): `client_id=dsn` pairs,
+   * comma-separated, e.g. `estiva-peek=https://<key>@o1.ingest.de.sentry.io/2`.
+   *
+   * A server secret: only this server holds Sentry's address, so nobody outside
+   * can send a report or use up the month. An app with no entry here has its
+   * reports accepted and dropped, so an app can ship its reporter first.
+   */
+  SENTRY_DSNS: commaSeparated,
 })
 
 export type Config = z.infer<typeof schema>
