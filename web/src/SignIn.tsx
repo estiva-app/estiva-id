@@ -33,6 +33,7 @@ import {
   registerOptions,
   verifyCredential,
 } from './api'
+import { ErrorNotice } from './errorReports'
 
 interface Props {
   /** Called once a session exists. */
@@ -201,7 +202,9 @@ export function SignIn({ onSignedIn }: Props) {
 
       {mode.kind === 'invite-dead' && (
         <section className="card">
-          <div className="notice error">{inviteProblem[mode.reason] ?? inviteProblem.unknown}</div>
+          <ErrorNotice failure="link-not-valid">
+            {inviteProblem[mode.reason] ?? inviteProblem.unknown}
+          </ErrorNotice>
           <p className="card-note">
             If you already enrolled on this device, sign in below instead.
           </p>
@@ -215,9 +218,9 @@ export function SignIn({ onSignedIn }: Props) {
 
       {mode.kind === 'recovery-dead' && (
         <section className="card">
-          <div className="notice error">
+          <ErrorNotice failure="link-not-valid">
             {recoveryProblem[mode.reason] ?? recoveryProblem.unknown}
-          </div>
+          </ErrorNotice>
           <p className="card-note">If one of your devices still works, sign in with it instead.</p>
           <button type="button" className="primary" onClick={signIn} disabled={busy !== null}>
             {busy === 'sign-in' ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
@@ -241,7 +244,7 @@ export function SignIn({ onSignedIn }: Props) {
             longer have should not keep access.
           </div>
 
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="sign-in-failed">{error}</ErrorNotice>}
 
           <div className="row" style={{ marginTop: '1rem' }}>
             <button
@@ -287,7 +290,7 @@ export function SignIn({ onSignedIn }: Props) {
             )}
           </dl>
 
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="sign-in-failed">{error}</ErrorNotice>}
 
           <div className="row" style={{ marginTop: '1rem' }}>
             <button
@@ -315,7 +318,7 @@ export function SignIn({ onSignedIn }: Props) {
             Your device holds the passkey. There is no password to remember, and nothing to type.
           </p>
 
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="sign-in-failed">{error}</ErrorNotice>}
 
           <button type="button" className="primary" onClick={signIn} disabled={busy !== null}>
             {busy === 'sign-in' ? 'Waiting for your passkey…' : 'Sign in with a passkey'}

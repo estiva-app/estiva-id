@@ -51,7 +51,9 @@ export interface ReportStep {
 export interface ErrorReport {
   app: string
   release: string
-  how: 'error' | 'unhandled-rejection' | 'boundary'
+  how: 'error' | 'unhandled-rejection' | 'boundary' | 'failure' | 'refused'
+  /** A failure's name from {@link FAILURES}, or a refusal's code; only on those two. */
+  named?: string
   type: string
   message: string
   frames: ReportFrame[]
@@ -128,6 +130,42 @@ const SCREENS: Record<string, ReadonlySet<string>> = {
  * a change to the list, reviewed as one.
  */
 const ACTIONS: ReadonlySet<string> = new Set(['sent-message', 'write-refused'])
+
+/**
+ * What failed, when an app told a person something failed (PROD-5), with the
+ * sentence Sentry shows for it. The message the person saw is never sent: most
+ * name a title, a person or the relay's own sentence. `@estiva-app/platform`'s
+ * `FAILURES` is the same list; a name not here is `unnamed`.
+ */
+const FAILURES: ReadonlyMap<string, string> = new Map([
+  ['not-sent', 'Not sent'],
+  ['not-saved', 'Not saved'],
+  ['not-deleted', 'Not deleted'],
+  ['not-moved', 'Not moved'],
+  ['not-joined', 'Could not join'],
+  ['not-left', 'Could not leave'],
+  ['not-added', 'Could not add someone'],
+  ['not-created', 'Not created'],
+  ['not-archived', 'Not archived'],
+  ['not-restored', 'Not restored'],
+  ['not-renamed', 'Not renamed'],
+  ['not-resolved', 'Not resolved'],
+  ['not-loaded', 'Could not load'],
+  ['not-reached', 'Could not reach the server'],
+  ['not-signed', 'Estiva ID would not sign it'],
+  ['signed-out', 'The sign-in ended'],
+  ['sign-in-failed', 'Could not sign in'],
+  ['link-not-valid', 'The link is not valid'],
+  ['not-approved', 'The device was not approved'],
+  ['unnamed', 'A failure the app showed'],
+])
+
+/**
+ * A refused write's code, as the relay client reads it (`archived`, `busy`,
+ * `blocked`, `http-500`); anything else is `uncoded`. Never the relay's sentence.
+ * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/a-refusal-starts-with-a-reason-code-every-app-reads.md
+ */
+const CODE = /^[a-z][a-z0-9-]{0,39}$/
 
 /** A route pattern the app is known to have: `/app/teams/:id`, never an address. */
 export function readScreen(app: string, raw: unknown): string | undefined {
@@ -218,7 +256,23 @@ export async function accountKind(pubkey: string, delegated: boolean): Promise<A
   return 'person'
 }
 
-const HOW = new Set<ErrorReport['how']>(['error', 'unhandled-rejection', 'boundary'])
+const HOW = new Set<ErrorReport['how']>([
+  'error',
+  'unhandled-rejection',
+  'boundary',
+  'failure',
+  'refused',
+])
+
+/** A failure or a refusal carries its name and nothing else: no wording, no frames. */
+function readHandled(how: 'failure' | 'refused', named: unknown) {
+  if (how === 'failure') {
+    const name = typeof named === 'string' && FAILURES.has(named) ? named : 'unnamed'
+    return { named: name, type: 'Failure', message: FAILURES.get(name) as string }
+  }
+  const code = typeof named === 'string' && CODE.test(named) ? named : 'uncoded'
+  return { named: code, type: 'WriteRefused', message: code }
+}
 
 /**
  * Builds the report from the list. `body` is whatever the browser sent; the
@@ -251,14 +305,21 @@ export function rebuildReport(
     .map((step) => readStep(known.app, step, known.now))
     .filter((step): step is ReportStep => step !== undefined)
 
+  const how = HOW.has(input.how as ErrorReport['how']) ? (input.how as ErrorReport['how']) : 'error'
+  const handled = how === 'failure' || how === 'refused' ? readHandled(how, input.named) : undefined
+
   return {
     app: known.app,
     release:
       typeof input.release === 'string' && RELEASE.test(input.release) ? input.release : 'unknown',
-    how: HOW.has(input.how as ErrorReport['how']) ? (input.how as ErrorReport['how']) : 'error',
-    type: typeof error.type === 'string' && TYPE.test(error.type) ? error.type : 'Error',
-    message: scrubMessage(error.message),
-    frames,
+    how,
+    ...(handled
+      ? { named: handled.named, type: handled.type, message: handled.message, frames: [] }
+      : {
+          type: typeof error.type === 'string' && TYPE.test(error.type) ? error.type : 'Error',
+          message: scrubMessage(error.message),
+          frames,
+        }),
     screen: readScreen(known.app, input.screen) ?? '<unknown>',
     browser: readBrowser(known.userAgent),
     ...(known.pubkey ? { pubkey: known.pubkey } : {}),
@@ -280,12 +341,26 @@ const MECHANISM: Record<ErrorReport['how'], string> = {
   error: 'onerror',
   'unhandled-rejection': 'onunhandledrejection',
   boundary: 'react.errorboundary',
+  failure: 'failure-shown',
+  refused: 'write-refused',
 }
 
-/** The Sentry event: exactly the report's fields, and no request, IP address or extra. */
+/**
+ * The Sentry event: exactly the report's fields, and no request, IP address or
+ * extra. A failure or a refusal is grouped by its name (one issue per app for
+ * each code, so expected refusals such as `not-member` stay in their own row),
+ * an `unnamed` failure by its screen too, and is marked handled.
+ */
 export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
+  const handled = report.how === 'failure' || report.how === 'refused'
+  const fingerprint = [
+    report.how,
+    report.named ?? '',
+    ...(report.named === 'unnamed' ? [report.screen] : []),
+  ]
   return {
     event_id: eventId,
+    ...(handled ? { fingerprint } : {}),
     timestamp: now / 1000,
     platform: 'javascript',
     level: 'error',
@@ -297,7 +372,7 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
         {
           type: report.type,
           value: report.message,
-          mechanism: { type: MECHANISM[report.how], handled: false },
+          mechanism: { type: MECHANISM[report.how], handled },
           stacktrace: {
             // Sentry reads frames oldest call first; a stack is newest first.
             frames: [...report.frames].reverse().map((frame) => ({
@@ -313,7 +388,13 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
       ],
     },
     ...(report.pubkey ? { user: { id: report.pubkey } } : {}),
-    tags: { app: report.app, account: report.account, screen: report.screen },
+    tags: {
+      app: report.app,
+      account: report.account,
+      screen: report.screen,
+      ...(report.how === 'failure' ? { failure: report.named } : {}),
+      ...(report.how === 'refused' ? { code: report.named } : {}),
+    },
     contexts: {
       browser: {
         name: report.browser.name,

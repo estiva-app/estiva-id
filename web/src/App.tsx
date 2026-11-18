@@ -28,6 +28,13 @@ import {
   listOwnBots,
   logout,
 } from './api'
+import { reportFailure } from './errorReports'
+
+/** The account could not be read: the same line as before, and reported (PROD-5). */
+function LoadFailed({ children }: { children: string }) {
+  useEffect(() => reportFailure('not-loaded'), [])
+  return <p>{children}</p>
+}
 
 interface Loaded {
   me: Me
@@ -160,7 +167,7 @@ export function App() {
   if (state.kind === 'error') {
     return (
       <div className="centered">
-        <p>{state.message}</p>
+        <LoadFailed>{state.message}</LoadFailed>
       </div>
     )
   }

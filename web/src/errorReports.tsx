@@ -91,6 +91,52 @@ export function reportError(error: unknown, how: How): void {
   }
 }
 
+/**
+ * What failed, when a page tells the person something failed (PROD-5): the
+ * names the server's `FAILURES` list keeps for this origin. The message on
+ * the page is never sent: many are the server's own sentence.
+ */
+export type Failure =
+  | 'sign-in-failed'
+  | 'link-not-valid'
+  | 'not-approved'
+  | 'not-saved'
+  | 'not-loaded'
+  | 'not-reached'
+
+const handledSeen = new Set<string>()
+
+/**
+ * Report that the page told the person something failed, by what failed.
+ * Once per name per page per tab, and at most ten per tab apart from crashes; before
+ * sign-in the server's signed-out door limits it again. Never throws.
+ */
+export function reportFailure(what: Failure): void {
+  try {
+    const screen = screenOf(window.location.pathname)
+    const kind = `${what}|${screen}`
+    if (handledSeen.has(kind) || handledSeen.size >= MAX_PER_TAB) return
+    handledSeen.add(kind)
+    const body = JSON.stringify({
+      release: RELEASE,
+      how: 'failure',
+      named: what,
+      error: { type: 'Failure', message: what, frames: [] },
+      screen,
+      trail,
+    })
+    void fetch('/report', {
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body,
+    }).catch(() => {})
+  } catch {
+    // Reporting a failure must never become one.
+  }
+}
+
 /** Starts reporting the window's unhandled errors and rejections. */
 export function startErrorReports(): void {
   // No error object (a script from another origin, an extension): nothing of ours to report.
@@ -101,6 +147,23 @@ export function startErrorReports(): void {
     reportError(event.reason, 'unhandled-rejection'),
   )
   window.__crashOnPurpose = crashOnPurpose
+}
+
+/**
+ * The red notice a page shows when something failed, reported by what failed
+ * when it appears ({@link reportFailure}); its text is never sent.
+ */
+export function ErrorNotice({
+  failure,
+  as: Tag = 'div',
+  children,
+}: {
+  failure: Failure
+  as?: 'div' | 'p'
+  children: ReactNode
+}) {
+  useEffect(() => reportFailure(failure), [failure])
+  return <Tag className="notice error">{children}</Tag>
 }
 
 /**

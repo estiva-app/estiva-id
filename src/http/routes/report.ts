@@ -81,16 +81,34 @@ const DOOR_PER_SENDER_PER_HOUR = 3
 const doorSender = createRateLimiter(DOOR_PER_SENDER_PER_HOUR, 60 * 60_000)
 const doorDay = createRateLimiter(DOOR_PER_DAY, 24 * 60 * 60_000)
 
-function spend(personKey: string, clientId: string) {
-  const person = limiter.check(personKey)
-  return person.allowed ? appLimiter.check(clientId) : person
+/**
+ * A failure the page showed, before sign-in (a dead invite link, a passkey
+ * that is not registered here; PROD-5), has a door of its own, smaller still:
+ * those are common, and must never spend the budget a sign-in crash needs. At
+ * most 5 an hour and 20 a day, which is 600 a month beside the crash door's
+ * 1,500.
+ */
+const HANDLED_DOOR_PER_HOUR = 5
+const HANDLED_DOOR_PER_DAY = 20
+const handledDoorHour = createRateLimiter(HANDLED_DOOR_PER_HOUR, 60 * 60_000)
+const handledDoorDay = createRateLimiter(HANDLED_DOOR_PER_DAY, 24 * 60 * 60_000)
+
+/**
+ * Failures and refusals (PROD-5) count on keys of their own, so a relay that
+ * refuses every tab's writes for an hour cannot use up the budget the crashes
+ * in that hour need. Each app may then send up to 100 of each an hour.
+ */
+function spend(personKey: string, clientId: string, handled: boolean) {
+  const suffix = handled ? ':handled' : ''
+  const person = limiter.check(`${personKey}${suffix}`)
+  return person.allowed ? appLimiter.check(`${clientId}${suffix}`) : person
 }
 
-function spendDoor(sender: string) {
-  const own = doorSender.check(sender)
+function spendDoor(sender: string, handled: boolean) {
+  const own = doorSender.check(handled ? `${sender}:handled` : sender)
   if (!own.allowed) return own
-  const hour = doorHour.check('door')
-  return hour.allowed ? doorDay.check('door') : hour
+  const hour = (handled ? handledDoorHour : doorHour).check('door')
+  return hour.allowed ? (handled ? handledDoorDay : doorDay).check('door') : hour
 }
 
 interface Sender {
@@ -165,9 +183,11 @@ export function reportRoutes(): Hono<AppEnv> {
 
     // The person's budget first, so one person's loop does not spend the app's.
     // Before sign-in there is no person to count: the door has its own, small one.
+    const how = (body as { how?: unknown } | null)?.how
+    const handled = how === 'failure' || how === 'refused'
     const budget = pubkey
-      ? spend(`${clientId}:${pubkey}`, clientId)
-      : spendDoor(c.req.header('cf-connecting-ip') ?? 'direct')
+      ? spend(`${clientId}:${pubkey}`, clientId, handled)
+      : spendDoor(c.req.header('cf-connecting-ip') ?? 'direct', handled)
     if (!budget.allowed) {
       c.header('retry-after', String(budget.retryAfterSeconds))
       throw rateLimited('Too many error reports', {

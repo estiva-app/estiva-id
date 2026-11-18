@@ -50,6 +50,7 @@ import {
   renameRoleIdentity,
   setPersonRole,
 } from './api'
+import { ErrorNotice } from './errorReports'
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
@@ -339,7 +340,7 @@ function InvitePerson() {
         </>
       ) : (
         <>
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
           <form onSubmit={invite}>
             <label>
               <span className="label-text">Email</span>
@@ -443,7 +444,7 @@ function NewRoleIdentity({ onCreated }: { onCreated: (id: string) => void }) {
         afterwards.
       </p>
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
 
       <form onSubmit={create}>
         <label>
@@ -907,7 +908,7 @@ function CredentialCard({
         </>
       ) : (
         <>
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
           <form onSubmit={mint}>
             <label>
               <span className="label-text">Client id</span>
@@ -1017,17 +1018,17 @@ function AdmitCard({ person, onDone }: { person: Person; onDone: () => void }) {
 
       {result && !result.admitted && (
         <>
-          <div className="notice error">
+          <ErrorNotice failure="not-saved">
             The relay did not take it ({result.reason}). Until this works, they stay locked out —
             run it by hand:
-          </div>
+          </ErrorNotice>
           <div className="row">
             <code className="command">{result.command}</code>
           </div>
         </>
       )}
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
 
       {!result?.admitted && (
         <div className="row">
@@ -1119,7 +1120,7 @@ function ProfileCard({ person }: { person: Person }) {
         its name — in Ship, in Peek, and anywhere else reading the same events.
       </p>
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
       {note && <div className="notice ok">{note}</div>}
 
       <div className="row">
@@ -1173,7 +1174,7 @@ function RoleCard({ person, onDone }: { person: Person; onDone: () => void }) {
           : 'They can sign in and use the apps, and cannot see this console.'}
       </p>
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
       {note && <div className="notice ok">{note}</div>}
 
       <div className="row">
@@ -1236,10 +1237,10 @@ function ReinstateCard({ person, onDone }: { person: Person; onDone: () => void 
 
           {!result.relayAdmission.admitted && (
             <>
-              <div className="notice error">
+              <ErrorNotice failure="not-saved">
                 The relay did not take them back ({result.relayAdmission.reason}), so they are
                 active here and still shut out there. Run this:
-              </div>
+              </ErrorNotice>
               <div className="row">
                 <code className="command">{result.relayAdmission.command}</code>
               </div>
@@ -1254,7 +1255,7 @@ function ReinstateCard({ person, onDone }: { person: Person; onDone: () => void 
         </p>
       )}
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
 
       {!result &&
         (confirming ? (
@@ -1426,7 +1427,7 @@ function RecoveryCard({ person }: { person: Person }) {
         </>
       ) : (
         <>
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
           <div className="row">
             <button type="button" onClick={() => void issue()} disabled={busy}>
               {busy ? 'Issuing…' : 'Issue a recovery link'}
@@ -1521,12 +1522,12 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
       )}
 
       {result && !result.attestationPublished && (
-        <div className="notice error">
+        <ErrorNotice failure="not-saved">
           The profile withdrawing their handle did not reach the relay
           {result.publishError ? ` (${result.publishError})` : ''}, so{' '}
           <strong>the handle still resolves</strong> for anyone reading the old event. Republish
           once the relay is reachable.
-        </div>
+        </ErrorNotice>
       )}
 
       {command ? (
@@ -1559,7 +1560,7 @@ function OffboardCard({ person, onDone }: { person: Person; onDone: () => void }
         </p>
       )}
 
-      {error && <div className="notice error">{error}</div>}
+      {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
 
       {/*
         The operator gets an explanation instead of a button (PEEK-102). The

@@ -18,6 +18,7 @@ import {
   revokeOtherSessions,
   verifyCredential,
 } from './api'
+import { ErrorNotice } from './errorReports'
 
 interface Props {
   credentials: Credential[]
@@ -119,7 +120,11 @@ export function PasskeysCard({ credentials, onChange }: Props) {
         than a lockout — otherwise getting back in means asking an admin for a recovery link.
       </p>
 
-      {notice && <div className={`notice ${notice.tone}`}>{notice.text}</div>}
+      {notice?.tone === 'error' ? (
+        <ErrorNotice failure="not-saved">{notice.text}</ErrorNotice>
+      ) : (
+        notice && <div className={`notice ${notice.tone}`}>{notice.text}</div>
+      )}
 
       <ul className="credentials">
         {credentials.map((credential) => (

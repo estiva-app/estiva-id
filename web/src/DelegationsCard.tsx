@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { type Delegation, listDelegations, revokeDelegation } from './api'
+import { ErrorNotice } from './errorReports'
 
 const formatWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
@@ -54,7 +55,11 @@ export function DelegationsCard() {
         These can read and post as you until they expire. Everything they post is tagged with the
         bot's name.
       </p>
-      {error && <p className="notice error">{error}</p>}
+      {error && (
+        <ErrorNotice as="p" failure="not-saved">
+          {error}
+        </ErrorNotice>
+      )}
       <ul className="plain">
         {delegations.map((delegation) => (
           <li key={delegation.id} className="row">
