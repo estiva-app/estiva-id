@@ -6,8 +6,9 @@
  * private card is the thing a person most needs to understand here and the
  * least likely to guess.
  */
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { ApiError, type Profile, type SaveProfileResult, saveProfile, uploadAvatar } from './api'
+import { reportFailure } from './errorReports'
 import { ImageUnreadable, prepareAvatar } from './image'
 
 interface Props {
@@ -177,6 +178,9 @@ function AvatarField({
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (error) reportFailure('not-saved')
+  }, [error])
 
   async function onPick(file: File) {
     setBusy(true)

@@ -20,6 +20,7 @@ import {
   deviceApprovalOptions,
   getDeviceRequest,
 } from './api'
+import { ErrorNotice } from './errorReports'
 
 type State =
   | { kind: 'loading' }
@@ -96,7 +97,11 @@ export function DeviceApproval({ initialCode }: { initialCode: string | null }) 
               void lookUp(code)
             }}
           >
-            {state.kind === 'missing' && <p className="notice error">{state.message}</p>}
+            {state.kind === 'missing' && (
+              <ErrorNotice as="p" failure="link-not-valid">
+                {state.message}
+              </ErrorNotice>
+            )}
             <label>
               Code shown by the bot
               <input
@@ -135,7 +140,11 @@ export function DeviceApproval({ initialCode }: { initialCode: string | null }) 
               Only {state.request.ownerDisplayName ?? 'the person this bot belongs to'} can approve
               this, with their passkey. Code {state.request.userCode}.
             </p>
-            {error && <p className="notice error">{error}</p>}
+            {error && (
+              <ErrorNotice as="p" failure="not-approved">
+                {error}
+              </ErrorNotice>
+            )}
             <div className="row">
               <button
                 type="button"

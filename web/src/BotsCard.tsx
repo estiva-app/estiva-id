@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError, type OwnBot, createOwnBot, retireOwnBot, rotateBotSecret } from './api'
+import { ErrorNotice } from './errorReports'
 
 /**
  * The bots you made for yourself (PEEK-164).
@@ -204,7 +205,7 @@ export function BotsCard({
         </>
       ) : (
         <>
-          {error && <div className="notice error">{error}</div>}
+          {error && <ErrorNotice failure="not-saved">{error}</ErrorNotice>}
 
           {bots.length > 0 && (
             <ul className="plain">

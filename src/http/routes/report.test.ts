@@ -179,6 +179,68 @@ describe('POST /report', () => {
     expect(event.contexts).toEqual({ browser: { name: 'Chrome', version: '131' } })
   })
 
+  it('sends a failure the person was told about under our fixed sentence, grouped by its name, and nothing planted', async () => {
+    const response = await report(qaToken, {
+      ...crash,
+      how: 'failure',
+      named: 'not-sent',
+      error: {
+        type: 'Failure',
+        message: `Not sent in ${PLANTED_TITLE}`,
+        frames: crash.error.frames,
+      },
+    })
+    expect(response.status).toBe(202)
+    const envelope = sentEnvelopes()[0] as string
+    for (const planted of ['plantedmessage', 'plantedtitle', 'plantedaddress']) {
+      expect(envelope).not.toContain(planted)
+    }
+    const event = sentEvent()
+    expect(event.exception.values[0]).toMatchObject({
+      type: 'Failure',
+      value: 'Not sent',
+      mechanism: { type: 'failure-shown', handled: true },
+      stacktrace: { frames: [] },
+    })
+    expect(event.fingerprint).toEqual(['failure', 'not-sent'])
+    expect(event.tags).toMatchObject({ account: 'qa', failure: 'not-sent' })
+  })
+
+  it('sends a failure named outside the list as unnamed', async () => {
+    await report(personToken, { ...crash, how: 'failure', named: PLANTED_TITLE })
+    const event = sentEvent()
+    expect(event.exception.values[0].value).toBe('A failure the app showed')
+    expect(event.fingerprint).toEqual(['failure', 'unnamed'])
+    expect(sentEnvelopes()[0]).not.toContain('plantedtitle')
+  })
+
+  it("sends a refused write by its code alone, never the relay's sentence", async () => {
+    await report(personToken, {
+      ...crash,
+      how: 'refused',
+      named: 'archived',
+      error: {
+        type: 'WriteRefused',
+        message: `invalid: archived: team “${PLANTED_TITLE}” is archived`,
+        frames: [],
+      },
+    })
+    const event = sentEvent()
+    expect(event.exception.values[0]).toMatchObject({
+      type: 'WriteRefused',
+      value: 'Write refused: archived',
+      mechanism: { type: 'write-refused', handled: true },
+    })
+    expect(event.fingerprint).toEqual(['refused', 'archived'])
+    expect(event.tags).toMatchObject({ code: 'archived' })
+    expect(sentEnvelopes()[0]).not.toContain('plantedtitle')
+  })
+
+  it('sends a refusal code of any other shape as uncoded', async () => {
+    await report(personToken, { ...crash, how: 'refused', named: `blocked: ${PLANTED_TITLE}` })
+    expect(sentEvent().fingerprint).toEqual(['refused', 'uncoded'])
+  })
+
   it('takes who sent it from the sign-in, never from the report', async () => {
     await report(personToken, crash)
     expect(sentEvent().user.id).toBe(personPubkey)
