@@ -36,6 +36,7 @@ import { verifyToken } from '../../domain/jwt.js'
 import { findSignerByPubkey } from '../../domain/keys.js'
 import { badRequest, forbidden, notFound, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
+import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
 
 const HEX64 = /^[0-9a-f]{64}$/
@@ -50,13 +51,6 @@ const MAX_LOOKUP = 200
 const lookupSchema = z.object({
   pubkeys: z.array(z.string().regex(HEX64, 'expected 64 lowercase hex characters')).max(MAX_LOOKUP),
 })
-
-function bearerToken(header: string | undefined): string {
-  if (!header?.startsWith('Bearer ')) throw unauthenticated('Expected a Bearer token')
-  const token = header.slice('Bearer '.length).trim()
-  if (!token) throw unauthenticated('Empty Bearer token')
-  return token
-}
 
 /**
  * Resolve the caller, and refuse anyone who is no longer active.

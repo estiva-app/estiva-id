@@ -63,6 +63,7 @@ import {
   encrypt,
 } from '../../nostr/nip44.js'
 import type { AppEnv } from '../app.js'
+import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
 import { createRateLimiter } from '../rate-limit.js'
 
@@ -90,13 +91,6 @@ export const resetRateLimitForTests = () => limiter.reset()
 // `.strict()` is load-bearing, not tidiness — see the header.
 const encryptSchema = z.object({ plaintext: z.string() }).strict()
 const decryptSchema = z.object({ ciphertext: z.string() }).strict()
-
-function bearerToken(header: string | undefined): string {
-  if (!header?.startsWith('Bearer ')) throw unauthenticated('Expected a Bearer token')
-  const token = header.slice('Bearer '.length).trim()
-  if (!token) throw unauthenticated('Empty Bearer token')
-  return token
-}
 
 type Operation = 'encrypt' | 'decrypt'
 
