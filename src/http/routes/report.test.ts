@@ -329,6 +329,19 @@ describe('POST /report', () => {
     expect(sentry).toHaveBeenCalledTimes(100)
   })
 
+  it('counts refusals apart from crashes, so a relay refusing every write for an hour leaves the crashes room', async () => {
+    const tokens = await Promise.all(
+      [1, 2, 3, 4].map(async (n) => {
+        const { pubkey } = await createUserWithKey({ email: `r${n}@example.test` })
+        return (await issueToken({ pubkey, clientId: 'estiva-peek' })).token
+      }),
+    )
+    const refused = { ...crash, how: 'refused', named: 'busy' }
+    for (const token of tokens) for (let i = 0; i < 26; i++) await report(token, refused)
+    expect((await report(tokens[0] as string, refused)).status).toBe(429)
+    expect((await report(tokens[0] as string, crash)).status).toBe(202)
+  })
+
   it('accepts and drops a report from an app with no Sentry address', async () => {
     const pubkey = (await createUserWithKey({ email: 'bo@example.test' })).pubkey
     const shipToken = (await issueToken({ pubkey, clientId: 'estiva-ship' })).token
@@ -392,6 +405,22 @@ describe("POST /report from Estiva ID's own pages", () => {
   beforeEach(() => {
     clock += 25 * 60 * 60_000
     vi.setSystemTime(clock)
+  })
+
+  it('keeps failures shown before sign-in to a door of their own, so a sign-in crash still gets through', async () => {
+    const statuses: number[] = []
+    for (let i = 0; i < 6; i++)
+      statuses.push(
+        (
+          await report(
+            undefined,
+            { ...ownCrash(), how: 'failure', named: 'link-not-valid' },
+            { origin: OWN, 'cf-connecting-ip': `198.51.100.${i}` },
+          )
+        ).status,
+      )
+    expect(statuses).toEqual([202, 202, 202, 202, 202, 429])
+    expect((await fromOwnPage({ 'cf-connecting-ip': '198.51.100.99' })).status).toBe(202)
   })
 
   it('takes a crash before sign-in, marked as not signed in and with no public key', async () => {
