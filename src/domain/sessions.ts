@@ -133,6 +133,22 @@ function toSession(row: SessionRow): Session {
 }
 
 /**
+ * The live session a token names, without counting it as a use: the idle end
+ * stays where it is. For a page's crash report (PROD-4), which says whose page
+ * it was and must not keep an idle session alive.
+ */
+export async function peekSession(token: string): Promise<Session | undefined> {
+  const row = await queryOne<SessionRow>(
+    `select id, user_id, delegate_client_id, delegate_tag, authenticated_at
+       from sessions
+      where token_hash = $1
+        and ${liveSessionSql()}`,
+    [hashToken(token)],
+  )
+  return row ? toSession(row) : undefined
+}
+
+/**
  * Resolve a session token, or undefined if absent, ended or revoked.
  *
  * Resolving it is a use: the idle end moves forward.

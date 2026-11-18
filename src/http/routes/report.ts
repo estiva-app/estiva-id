@@ -33,8 +33,8 @@ import {
 } from '../../domain/error-reports.js'
 import { verifyToken } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
-import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
-import { badRequest, rateLimited } from '../../errors.js'
+import { SESSION_COOKIE, peekSession } from '../../domain/sessions.js'
+import { badRequest, rateLimited, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
@@ -71,22 +71,24 @@ const appLimiter = createRateLimiter(APP_REPORTS_PER_HOUR, 60 * 60_000)
 const DOOR_PER_HOUR = 10
 const DOOR_PER_DAY = 50
 const doorHour = createRateLimiter(DOOR_PER_HOUR, 60 * 60_000)
+/**
+ * Per sender first, so one sender cannot spend the whole door and starve a
+ * real sign-in crash. Keyed on `cf-connecting-ip`, which Cloudflare's tunnel
+ * in front of this server sets itself (a client cannot choose it); without it,
+ * every sender shares one key and only the global budget holds.
+ */
+const DOOR_PER_SENDER_PER_HOUR = 3
+const doorSender = createRateLimiter(DOOR_PER_SENDER_PER_HOUR, 60 * 60_000)
 const doorDay = createRateLimiter(DOOR_PER_DAY, 24 * 60 * 60_000)
-
-/** Test seam — see `rate-limit.ts`. Not reachable over HTTP. */
-export const resetReportRateLimitsForTests = () => {
-  limiter.reset()
-  appLimiter.reset()
-  doorHour.reset()
-  doorDay.reset()
-}
 
 function spend(personKey: string, clientId: string) {
   const person = limiter.check(personKey)
   return person.allowed ? appLimiter.check(clientId) : person
 }
 
-function spendDoor() {
+function spendDoor(sender: string) {
+  const own = doorSender.check(sender)
+  if (!own.allowed) return own
   const hour = doorHour.check('door')
   return hour.allowed ? doorDay.check('door') : hour
 }
@@ -123,8 +125,11 @@ async function whoSends(c: Context<AppEnv>): Promise<Sender> {
   }
 
   const cookie = getCookie(c, SESSION_COOKIE)
-  const session = cookie ? await resolveSession(cookie) : null
+  // Not a use of the session: a crashing page must not keep an idle one alive.
+  const session = cookie ? await peekSession(cookie) : undefined
   const pubkey = session ? await getActivePubkey(session.userId) : undefined
+  // Signed in with no key to name (offboarded in another tab): neither a person nor nobody.
+  if (session && !pubkey) throw unauthenticated('No active key for this session')
   return {
     clientId: ESTIVA_ID_WEB,
     pubkey,
@@ -160,7 +165,9 @@ export function reportRoutes(): Hono<AppEnv> {
 
     // The person's budget first, so one person's loop does not spend the app's.
     // Before sign-in there is no person to count: the door has its own, small one.
-    const budget = pubkey ? spend(`${clientId}:${pubkey}`, clientId) : spendDoor()
+    const budget = pubkey
+      ? spend(`${clientId}:${pubkey}`, clientId)
+      : spendDoor(c.req.header('cf-connecting-ip') ?? 'direct')
     if (!budget.allowed) {
       c.header('retry-after', String(budget.retryAfterSeconds))
       throw rateLimited('Too many error reports', {

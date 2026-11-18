@@ -93,7 +93,10 @@ export function reportError(error: unknown, how: How): void {
 
 /** Starts reporting the window's unhandled errors and rejections. */
 export function startErrorReports(): void {
-  window.addEventListener('error', (event) => reportError(event.error, 'error'))
+  // No error object (a script from another origin, an extension): nothing of ours to report.
+  window.addEventListener('error', (event) => {
+    if (event.error instanceof Error) reportError(event.error, 'error')
+  })
   window.addEventListener('unhandledrejection', (event) =>
     reportError(event.reason, 'unhandled-rejection'),
   )
