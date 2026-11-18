@@ -69,11 +69,26 @@ describe('scrubMessage', () => {
     )
   })
 
-  it('cleans a 100 KB message without holding the server: only its start is read', () => {
-    // Quadratic before: 449 ms at 30 KB, seconds at 100 KB. The bound leaves a wide margin for a loaded runner.
+  it.each([
+    ['one long word', 'a'],
+    ['a word with an @ in every two letters', 'a@'],
+    ['a word with a dot in every two letters', 'a.'],
+  ])('cleans a 100 KB message of %s without holding the server', (_name, unit) => {
+    // Quadratic before: 449 ms at 30 KB and seconds at 100 KB. The bound leaves a wide margin for a loaded runner.
     const started = performance.now()
-    expect(scrubMessage('a'.repeat(100_000))).toBe(`${'a'.repeat(199)}…`)
+    scrubMessage(unit.repeat(100_000 / unit.length))
     expect(performance.now() - started).toBeLessThan(200)
+  })
+
+  // A message far past the 200 kept is still cleaned whole: these rules read its end (review of #98).
+  const long = 'planted words a person wrote '.repeat(40)
+  it.each([
+    [`URL constructor: ${long} is not a valid URL.`, 'URL constructor: … is not a valid URL.'],
+    [`Cannot convert ${long} to a number`, 'Cannot convert … to a number'],
+    [`Topic "general" missing in "${long}"`, 'Topic …'],
+    [`Cannot read "${long.slice(0, 500)} 5' tall ${long}"`, 'Cannot read …'],
+  ])('cleans a long message by its end: %#', (raw, expected) => {
+    expect(scrubMessage(raw)).toBe(expected)
   })
 
   it('caps a long message at 200 characters', () => {
