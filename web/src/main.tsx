@@ -2,7 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { DeviceApproval } from './DeviceApproval'
+import { CrashOnPurpose, ErrorBoundary, startErrorReports } from './errorReports'
 import './styles.css'
+
+// A crash on these pages is reported, signed in or not, and shows a message instead of a blank page (PROD-4).
+startErrorReports()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('No #root element')
@@ -13,10 +17,13 @@ const isDeviceApproval = window.location.pathname === '/device'
 
 createRoot(root).render(
   <StrictMode>
-    {isDeviceApproval ? (
-      <DeviceApproval initialCode={new URLSearchParams(window.location.search).get('code')} />
-    ) : (
-      <App />
-    )}
+    <ErrorBoundary>
+      <CrashOnPurpose />
+      {isDeviceApproval ? (
+        <DeviceApproval initialCode={new URLSearchParams(window.location.search).get('code')} />
+      ) : (
+        <App />
+      )}
+    </ErrorBoundary>
   </StrictMode>,
 )

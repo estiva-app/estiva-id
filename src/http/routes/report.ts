@@ -15,16 +15,25 @@
  *
  * Cross-origin like `/sign`: the apps are static bundles on other origins, and
  * the allowlist is the registered redirect URIs (`http/cors.ts`).
+ *
+ * Estiva ID's own pages (PROD-4) send from this origin with no token: signed
+ * in, their session cookie says who; before sign-in they come through a door
+ * with its own small budget, marked `signed-out` and with no public key.
  */
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { getCookie } from 'hono/cookie'
+import { config } from '../../config.js'
 import {
+  ESTIVA_ID_WEB,
   accountKind,
   rebuildReport,
   sendToSentry,
   sentryDsnFor,
 } from '../../domain/error-reports.js'
 import { verifyToken } from '../../domain/jwt.js'
+import { getActivePubkey } from '../../domain/keys.js'
+import { SESSION_COOKIE, resolveSession } from '../../domain/sessions.js'
 import { badRequest, rateLimited } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { bearerToken } from '../bearer.js'
@@ -51,6 +60,79 @@ const limiter = createRateLimiter(REPORTS_PER_WINDOW, WINDOW_MS)
 const APP_REPORTS_PER_HOUR = 100
 const appLimiter = createRateLimiter(APP_REPORTS_PER_HOUR, 60 * 60_000)
 
+/**
+ * The door before sign-in (PROD-4): a crash on Estiva ID's own sign-in page
+ * happens before anyone is signed in. Only Estiva ID's own origin may use it,
+ * and an Origin header can be forged outside a browser, so its budget is what
+ * holds: at most 10 an hour and 50 a day across everyone, which is at most
+ * 1,500 of Sentry's free 5,000 a month even if somebody spends it all. It
+ * spends neither a person's budget nor an app's.
+ */
+const DOOR_PER_HOUR = 10
+const DOOR_PER_DAY = 50
+const doorHour = createRateLimiter(DOOR_PER_HOUR, 60 * 60_000)
+const doorDay = createRateLimiter(DOOR_PER_DAY, 24 * 60 * 60_000)
+
+/** Test seam — see `rate-limit.ts`. Not reachable over HTTP. */
+export const resetReportRateLimitsForTests = () => {
+  limiter.reset()
+  appLimiter.reset()
+  doorHour.reset()
+  doorDay.reset()
+}
+
+function spend(personKey: string, clientId: string) {
+  const person = limiter.check(personKey)
+  return person.allowed ? appLimiter.check(clientId) : person
+}
+
+function spendDoor() {
+  const hour = doorHour.check('door')
+  return hour.allowed ? doorDay.check('door') : hour
+}
+
+interface Sender {
+  clientId: string
+  /** Absent only through the door before sign-in. */
+  pubkey: string | undefined
+  delegated: boolean
+  /** The origin whose bundles a frame may name; anything else is `<other>`. */
+  appOrigin: string | undefined
+}
+
+/**
+ * Who sends this report, never from the report itself:
+ * - an app on another origin, by the token Estiva ID issued it (`Authorization: Bearer`);
+ * - Estiva ID's own pages, by their session cookie;
+ * - Estiva ID's own pages before sign-in, through the door, as nobody.
+ * A report from any other origin without a token is refused as before.
+ */
+async function whoSends(c: Context<AppEnv>): Promise<Sender> {
+  const authorization = c.req.header('authorization')
+  const origin = c.req.header('origin')
+  const ownOrigin = new URL(config().ISSUER_URL).origin
+  if (authorization || origin !== ownOrigin) {
+    const allowed = await allowOrigin(c)
+    const { pubkey, clientId, delegate } = await verifyToken(bearerToken(authorization))
+    return {
+      clientId,
+      pubkey,
+      delegated: delegate !== undefined,
+      appOrigin: allowed ? origin : undefined,
+    }
+  }
+
+  const cookie = getCookie(c, SESSION_COOKIE)
+  const session = cookie ? await resolveSession(cookie) : null
+  const pubkey = session ? await getActivePubkey(session.userId) : undefined
+  return {
+    clientId: ESTIVA_ID_WEB,
+    pubkey,
+    delegated: session?.delegate !== undefined,
+    appOrigin: ownOrigin,
+  }
+}
+
 export function reportRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>()
 
@@ -65,10 +147,8 @@ export function reportRoutes(): Hono<AppEnv> {
   })
 
   routes.post('/report', sizeCap, async (c) => {
-    const allowed = await allowOrigin(c)
-    const { pubkey, clientId, delegate } = await verifyToken(
-      bearerToken(c.req.header('authorization')),
-    )
+    const sender = await whoSends(c)
+    const { pubkey, clientId, appOrigin } = sender
 
     const raw = await c.req.text()
     let body: unknown
@@ -79,8 +159,8 @@ export function reportRoutes(): Hono<AppEnv> {
     }
 
     // The person's budget first, so one person's loop does not spend the app's.
-    const personBudget = limiter.check(`${clientId}:${pubkey}`)
-    const budget = personBudget.allowed ? appLimiter.check(clientId) : personBudget
+    // Before sign-in there is no person to count: the door has its own, small one.
+    const budget = pubkey ? spend(`${clientId}:${pubkey}`, clientId) : spendDoor()
     if (!budget.allowed) {
       c.header('retry-after', String(budget.retryAfterSeconds))
       throw rateLimited('Too many error reports', {
@@ -95,9 +175,9 @@ export function reportRoutes(): Hono<AppEnv> {
     const now = Date.now()
     const report = rebuildReport(body, {
       app: clientId,
-      appOrigin: allowed ? c.req.header('origin') : undefined,
+      appOrigin,
       pubkey,
-      account: await accountKind(pubkey, delegate !== undefined),
+      account: pubkey ? await accountKind(pubkey, sender.delegated) : 'signed-out',
       userAgent: c.req.header('user-agent'),
       now,
     })

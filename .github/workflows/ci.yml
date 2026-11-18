@@ -104,6 +104,9 @@ jobs:
         with:
           context: .
           push: true
+          # The pages' error reports name the commit they were built from (PROD-4).
+          build-args: |
+            RELEASE=${{ github.sha }}
           # `main` is what the box tracks; the sha tag is what makes a rollback
           # possible without rebuilding.
           tags: |
