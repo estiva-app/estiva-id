@@ -50,6 +50,8 @@ export interface ErrorReport {
 }
 
 const MAX_MESSAGE = 200
+/** Of a message, only this much is cleaned: the most of it that can end up in the 200 kept. The browser's copy is the same. */
+const MAX_WORDING = 1000
 const MAX_FRAMES = 50
 const MAX_TRAIL = 10
 const TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
@@ -65,7 +67,9 @@ const QUOTES = /["'`‘’“”«»]/
  */
 export function scrubMessage(raw: unknown): string {
   if (typeof raw !== 'string') return ''
-  let text = raw.replace(/\p{Cc}+/gu, ' ')
+  // Only the start is ever kept, and the cleaning below costs the square of the length past it:
+  // 449 ms for a 32 KB message, on the one thread every sign-in shares.
+  let text = raw.slice(0, MAX_WORDING).replace(/\p{Cc}+/gu, ' ')
 
   // An apostrophe inside a word (Firefox's "can't access property") is wording, not a quote.
   const isQuote = (i: number) =>

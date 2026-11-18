@@ -69,6 +69,13 @@ describe('scrubMessage', () => {
     )
   })
 
+  it('cleans a 100 KB message without holding the server: only its start is read', () => {
+    // Quadratic before: 449 ms at 30 KB, seconds at 100 KB. The bound leaves a wide margin for a loaded runner.
+    const started = performance.now()
+    expect(scrubMessage('a'.repeat(100_000))).toBe(`${'a'.repeat(199)}…`)
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
   it('caps a long message at 200 characters', () => {
     expect(scrubMessage('word '.repeat(100)).length).toBe(200)
   })
