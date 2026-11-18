@@ -346,7 +346,7 @@ describe("POST /report from Estiva ID's own pages", () => {
   it('says who it is when the page is signed in, by its session cookie', async () => {
     const ada = await createUserWithKey({ email: 'ada2@example.test' })
     const { token } = await createSession({ userId: ada.id })
-    await fromOwnPage({ cookie: `${SESSION_COOKIE}=${token}` })
+    expect((await fromOwnPage({ cookie: `${SESSION_COOKIE}=${token}` })).status).toBe(202)
     const event = sentEvent()
     expect(event.user).toEqual({ id: ada.pubkey })
     expect(event.tags).toMatchObject({ app: 'estiva-id-web', account: 'person' })
@@ -373,7 +373,7 @@ describe("POST /report from Estiva ID's own pages", () => {
     const before = await idleEnd()
     clock += 60 * 60_000
     vi.setSystemTime(clock)
-    await fromOwnPage({ cookie: `${SESSION_COOKIE}=${token}` })
+    expect((await fromOwnPage({ cookie: `${SESSION_COOKIE}=${token}` })).status).toBe(202)
     expect(sentEvent().user).toEqual({ id: ada.pubkey })
     expect(await idleEnd()).toEqual(before)
   })
