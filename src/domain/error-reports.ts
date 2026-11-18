@@ -65,6 +65,7 @@ const QUOTES = /["'`‘’“”«»]/
  */
 export function scrubMessage(raw: unknown): string {
   if (typeof raw !== 'string') return ''
+  // The whole wording is cleaned, never a cut of it: the rules below read its end.
   let text = raw.replace(/\p{Cc}+/gu, ' ')
 
   // An apostrophe inside a word (Firefox's "can't access property") is wording, not a quote.
@@ -103,8 +104,11 @@ export function scrubMessage(raw: unknown): string {
       'Cannot convert … to a $1',
     )
     // A web address runs to the end: one with a space in it would leave the rest behind.
-    .replace(/\b[a-z][a-z0-9+.-]*:\/\/.*$/is, '<url>')
-    .replace(/\S+@\S+\.\S+/g, '<address>')
+    // Starts only where a run of scheme letters does: from every dot of `a.a.a…` it cost the square of the length.
+    .replace(/(?<![a-z0-9+.-])[a-z0-9+.-]*:\/\/.*$/is, '<url>')
+    // Starts only where a word does, and no part of it spans an @: `\S+@\S+` tried from every
+    // letter of a long word costs the square of its length (614 ms at 32 KB, on the one thread).
+    .replace(/(?<!\S)[^\s@]*@\S*\.\S*/g, '<address>')
     .replace(/\b(npub|nsec|note|nevent|naddr|nprofile|nrelay)1[0-9a-z]+/gi, '<id>')
     // A key, event id or token has digits; a long code name (`useLiveTopicSubscription`) has none.
     .replace(/[A-Za-z0-9+/=_-]{16,}/g, (run) => (/\d/.test(run) ? '<id>' : run))

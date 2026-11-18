@@ -69,6 +69,40 @@ describe('scrubMessage', () => {
     )
   })
 
+  it.each([
+    ['one long word', 'a'],
+    ['a word with an @ in every two letters', 'a@'],
+    ['a word with a dot in every two letters', 'a.'],
+  ])('cleans a 100 KB message of %s without holding the server', (_name, unit) => {
+    // Quadratic before: 449 ms at 30 KB and seconds at 100 KB. The bound leaves a wide margin for a loaded runner.
+    const started = performance.now()
+    scrubMessage(unit.repeat(100_000 / unit.length))
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
+  // A message far past the 200 kept is still cleaned whole: these rules read its end (review of #98).
+  const long = 'planted words a person wrote '.repeat(40)
+  it.each([
+    [`URL constructor: ${long} is not a valid URL.`, 'URL constructor: … is not a valid URL.'],
+    [`Cannot convert ${long} to a number`, 'Cannot convert … to a number'],
+    [`Topic "general" missing in "${long}"`, 'Topic …'],
+    [`Cannot read "${long.slice(0, 500)} 5' tall ${long}"`, 'Cannot read …'],
+  ])('cleans a long message by its end: %#', (raw, expected) => {
+    expect(scrubMessage(raw)).toBe(expected)
+  })
+
+  // Shapes the faster patterns must still catch, as the old ones did (second review of #98).
+  it.each([
+    ['Load failed -https://peek.estiva.app/t/planted-visit', 'Load failed <url>'],
+    ['see .http://planted.example/x y', 'see <url>'],
+    ['+ftp://planted/notes', '<url>'],
+    ['mail planted@@example.com now', 'mail <address> now'],
+    ['to planted@corp@example.com now', 'to <address> now'],
+    ['Expected @ at line 3.', 'Expected @ at line 3.'],
+  ])('cleans %s', (raw, expected) => {
+    expect(scrubMessage(raw)).toBe(expected)
+  })
+
   it('caps a long message at 200 characters', () => {
     expect(scrubMessage('word '.repeat(100)).length).toBe(200)
   })
