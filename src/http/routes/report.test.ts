@@ -210,7 +210,8 @@ describe('POST /report', () => {
     await report(personToken, { ...crash, how: 'failure', named: PLANTED_TITLE })
     const event = sentEvent()
     expect(event.exception.values[0].value).toBe('A failure the app showed')
-    expect(event.fingerprint).toEqual(['failure', 'unnamed'])
+    // Grouped by screen too, so one app's unnamed failures are not one row.
+    expect(event.fingerprint).toEqual(['failure', 'unnamed', '/app/teams/:id'])
     expect(sentEnvelopes()[0]).not.toContain('plantedtitle')
   })
 
@@ -228,7 +229,7 @@ describe('POST /report', () => {
     const event = sentEvent()
     expect(event.exception.values[0]).toMatchObject({
       type: 'WriteRefused',
-      value: 'Write refused: archived',
+      value: 'archived',
       mechanism: { type: 'write-refused', handled: true },
     })
     expect(event.fingerprint).toEqual(['refused', 'archived'])

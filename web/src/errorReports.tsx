@@ -108,19 +108,21 @@ const handledSeen = new Set<string>()
 
 /**
  * Report that the page told the person something failed, by what failed.
- * Once per name per tab, and at most ten per tab apart from crashes; before
+ * Once per name per page per tab, and at most ten per tab apart from crashes; before
  * sign-in the server's signed-out door limits it again. Never throws.
  */
 export function reportFailure(what: Failure): void {
   try {
-    if (handledSeen.has(what) || handledSeen.size >= MAX_PER_TAB) return
-    handledSeen.add(what)
+    const screen = screenOf(window.location.pathname)
+    const kind = `${what}|${screen}`
+    if (handledSeen.has(kind) || handledSeen.size >= MAX_PER_TAB) return
+    handledSeen.add(kind)
     const body = JSON.stringify({
       release: RELEASE,
       how: 'failure',
       named: what,
       error: { type: 'Failure', message: what, frames: [] },
-      screen: screenOf(window.location.pathname),
+      screen,
       trail,
     })
     void fetch('/report', {

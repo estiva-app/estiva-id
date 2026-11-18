@@ -271,7 +271,7 @@ function readHandled(how: 'failure' | 'refused', named: unknown) {
     return { named: name, type: 'Failure', message: FAILURES.get(name) as string }
   }
   const code = typeof named === 'string' && CODE.test(named) ? named : 'uncoded'
-  return { named: code, type: 'WriteRefused', message: `Write refused: ${code}` }
+  return { named: code, type: 'WriteRefused', message: code }
 }
 
 /**
@@ -347,15 +347,20 @@ const MECHANISM: Record<ErrorReport['how'], string> = {
 
 /**
  * The Sentry event: exactly the report's fields, and no request, IP address or
- * extra. A failure or a refusal is grouped by its name alone (one issue per
- * app for each code, so expected refusals such as `not-member` stay in their
- * own row), and is marked handled.
+ * extra. A failure or a refusal is grouped by its name (one issue per app for
+ * each code, so expected refusals such as `not-member` stay in their own row),
+ * an `unnamed` failure by its screen too, and is marked handled.
  */
 export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
   const handled = report.how === 'failure' || report.how === 'refused'
+  const fingerprint = [
+    report.how,
+    report.named ?? '',
+    ...(report.named === 'unnamed' ? [report.screen] : []),
+  ]
   return {
     event_id: eventId,
-    ...(handled ? { fingerprint: [report.how, report.named ?? ''] } : {}),
+    ...(handled ? { fingerprint } : {}),
     timestamp: now / 1000,
     platform: 'javascript',
     level: 'error',
