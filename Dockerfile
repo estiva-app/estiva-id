@@ -22,7 +22,13 @@ RUN pnpm build
 # invalidate the service build's layer cache, or the other way round.
 FROM deps AS build-web
 WORKDIR /app
+# The commit the image is built from, for the pages' error reports (PROD-4).
+# Declared here, not earlier, so a new commit rebuilds only this stage.
+ARG RELEASE=unknown
+ENV GITHUB_SHA=$RELEASE
 COPY vite.config.ts ./
+# The pages clean an error's wording with the server's own rules before it leaves the browser.
+COPY src/domain/scrub-message.ts ./src/domain/scrub-message.ts
 COPY web ./web
 RUN pnpm build:web
 
