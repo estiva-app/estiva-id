@@ -130,6 +130,28 @@ describe('POST /timing', () => {
     })
   })
 
+  it('sends when Peek’s saved picture showed as a second number beside the wait, never as the wait', async () => {
+    await send(personToken, { ...timing(), waitMs: 2400, pictureMs: 180 })
+    const event = sentEvent()
+    expect(Math.round((event.timestamp - event.start_timestamp) * 1000)).toBe(2400)
+    expect(event.measurements).toEqual({ picture: { value: 180, unit: 'millisecond' } })
+  })
+
+  it('leaves out a picture number that is not one of ours, and still sends the wait', async () => {
+    for (const pictureMs of [-1, 1.5, 3_600_000, '180', { value: 'plantedtitle' }]) {
+      sentry.mockClear()
+      expect((await send(personToken, { ...timing(), pictureMs })).status).toBe(202)
+      const event = sentEvent()
+      expect(event.measurements).toBeUndefined()
+      expect(sentCalls()[0]?.body).not.toContain('plantedtitle')
+    }
+  })
+
+  it('sends no picture number when the browser sent none', async () => {
+    await send(personToken, timing())
+    expect(sentEvent().measurements).toBeUndefined()
+  })
+
   it('sends an open the person left while it was loading, marked left', async () => {
     await send(personToken, { ...timing(), waitMs: 4000, ready: 'left' })
     expect(sentEvent().tags.ready).toBe('left')

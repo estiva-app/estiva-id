@@ -44,6 +44,8 @@ export interface PageTiming {
   how: OpenHow
   waitMs: number
   ready: OpenReady
+  /** Peek: when the page load's saved picture showed, from the same start as the wait. A second number, never the wait (Miky, 19 Nov). */
+  pictureMs?: number
   browser: Software
   pubkey: string
   account: AccountKind
@@ -64,7 +66,14 @@ export function rebuildTiming(
   if (typeof ready !== 'string' || !READIES.has(ready)) return undefined
   if (typeof waitMs !== 'number' || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > MAX_WAIT_MS)
     return undefined
+  // Optional: a picture number that is not one of ours is left out, and the wait still counts.
+  const { pictureMs } = input
+  const picture =
+    typeof pictureMs === 'number' && Number.isInteger(pictureMs) && pictureMs >= 0 && pictureMs <= MAX_WAIT_MS
+      ? { pictureMs }
+      : {}
   return {
+    ...picture,
     app: known.app,
     release:
       typeof input.release === 'string' && RELEASE.test(input.release) ? input.release : 'unknown',
@@ -123,6 +132,9 @@ export function sentryTransaction(timing: PageTiming, eventId: string, now: numb
       },
     },
     spans: [],
+    ...(timing.pictureMs !== undefined
+      ? { measurements: { picture: { value: timing.pictureMs, unit: 'millisecond' } } }
+      : {}),
   }
 }
 
