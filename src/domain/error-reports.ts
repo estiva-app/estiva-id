@@ -51,18 +51,28 @@ export interface ReportStep {
 export interface ErrorReport {
   app: string
   release: string
-  how: 'error' | 'unhandled-rejection' | 'boundary' | 'failure' | 'refused'
+  /** `uncaught-exception` is the server's own (PROD-6): no browser can send it. */
+  how: 'error' | 'unhandled-rejection' | 'uncaught-exception' | 'boundary' | 'failure' | 'refused'
   /** A failure's name from {@link FAILURES}, or a refusal's code; only on those two. */
   named?: string
   type: string
   message: string
   frames: ReportFrame[]
   screen: string
-  browser: { name: string; version?: string }
-  /** Absent only before sign-in, on Estiva ID's own pages. */
+  /** A browser's report: the browser, from its User-Agent. */
+  browser?: Software
+  /** The server's own report (PROD-6): Node and its version, in place of a browser. */
+  runtime?: Software
+  /** Absent before sign-in on Estiva ID's own pages, and on a server error no sign-in had reached. */
   pubkey?: string
-  account: AccountKind
+  /** Absent only on a server error no sign-in had reached. */
+  account?: AccountKind
   trail: ReportStep[]
+}
+
+export interface Software {
+  name: string
+  version?: string
 }
 
 const MAX_FRAMES = 50
@@ -173,11 +183,11 @@ export function readScreen(app: string, raw: unknown): string | undefined {
 }
 
 /** A function as a stack names it: `parseBody`, `Object.<anonymous>`, `new Foo`, `async run`. */
-const FUNCTION_NAME =
+export const FUNCTION_NAME =
   /^(?:new |async )?[A-Za-z_$<][\w$<>]{0,60}(?:\.[A-Za-z_$<][\w$<>]{0,60}){0,4}$/
 const ASSET_PATH = /^\/assets\/[A-Za-z0-9_.-]{1,100}\.m?js$/
-const RELEASE = /^[0-9a-f]{7,40}$/
-const TYPE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/
+export const RELEASE = /^[0-9a-f]{7,40}$/
+export const TYPE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/
 
 const intIn = (value: unknown, max: number): number | undefined =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max
@@ -226,7 +236,7 @@ function readStep(app: string, raw: unknown, now: number): ReportStep | undefine
 }
 
 /** The browser's family and major version, from the request's own User-Agent. */
-export function readBrowser(userAgent: string | undefined): ErrorReport['browser'] {
+export function readBrowser(userAgent: string | undefined): Software {
   const ua = userAgent ?? ''
   const pick = (name: string, pattern: RegExp) => {
     const match = ua.match(pattern)
@@ -340,10 +350,13 @@ export function sentryDsnFor(clientId: string): string | undefined {
 const MECHANISM: Record<ErrorReport['how'], string> = {
   error: 'onerror',
   'unhandled-rejection': 'onunhandledrejection',
+  'uncaught-exception': 'onuncaughtexception',
   boundary: 'react.errorboundary',
   failure: 'failure-shown',
   refused: 'write-refused',
 }
+
+const software = (s: Software) => ({ name: s.name, ...(s.version ? { version: s.version } : {}) })
 
 /**
  * The Sentry event: exactly the report's fields, and no request, IP address or
@@ -362,7 +375,7 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
     event_id: eventId,
     ...(handled ? { fingerprint } : {}),
     timestamp: now / 1000,
-    platform: 'javascript',
+    platform: report.runtime ? 'node' : 'javascript',
     level: 'error',
     environment: 'production',
     release: report.release,
@@ -390,16 +403,14 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
     ...(report.pubkey ? { user: { id: report.pubkey } } : {}),
     tags: {
       app: report.app,
-      account: report.account,
+      ...(report.account ? { account: report.account } : {}),
       screen: report.screen,
       ...(report.how === 'failure' ? { failure: report.named } : {}),
       ...(report.how === 'refused' ? { code: report.named } : {}),
     },
     contexts: {
-      browser: {
-        name: report.browser.name,
-        ...(report.browser.version ? { version: report.browser.version } : {}),
-      },
+      ...(report.browser ? { browser: software(report.browser) } : {}),
+      ...(report.runtime ? { runtime: software(report.runtime) } : {}),
     },
     breadcrumbs: {
       values: report.trail.map((step) =>

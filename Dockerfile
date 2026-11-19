@@ -53,6 +53,10 @@ COPY --from=build-web /app/dist-web ./dist-web
 COPY migrations ./migrations
 COPY package.json ./
 
+# The commit, for the server's own error reports (PROD-6). Last, so only this layer changes per commit.
+ARG RELEASE=unknown
+ENV RELEASE=$RELEASE
+
 # The base image ships an unprivileged `node` user. Nothing here writes to disk.
 USER node
 
