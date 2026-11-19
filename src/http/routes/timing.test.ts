@@ -130,6 +130,11 @@ describe('POST /timing', () => {
     })
   })
 
+  it('sends an open the person left while it was loading, marked left', async () => {
+    await send(personToken, { ...timing(), waitMs: 4000, ready: 'left' })
+    expect(sentEvent().tags.ready).toBe('left')
+  })
+
   it('marks a QA account as QA', async () => {
     await send(qaToken, timing())
     expect(sentEvent().tags.account).toBe('qa')
@@ -184,6 +189,11 @@ describe('POST /timing', () => {
     expect(response.status).toBe(202)
     expect(await response.json()).toEqual({ sent: false, reason: 'not_collected' })
     expect(sentry).not.toHaveBeenCalled()
+  })
+
+  it('spends no budget on a body that is not a timing', async () => {
+    for (let i = 0; i < 300; i++) await send(personToken, { ...timing(), how: 'teleport' })
+    expect((await send(personToken, timing())).status).toBe(202)
   })
 
   it('stops one person at 300 timings an hour', async () => {

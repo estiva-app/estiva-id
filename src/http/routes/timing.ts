@@ -68,6 +68,15 @@ export function timingRoutes(): Hono<AppEnv> {
       throw badRequest('Expected a JSON timing')
     }
 
+    // Checked before the budget is spent: a broken build's bodies never crowd out the good ones.
+    const timing = rebuildTiming(body, {
+      app: clientId,
+      pubkey,
+      account: 'person',
+      userAgent: c.req.header('user-agent'),
+    })
+    if (!timing) throw badRequest('Not a timing')
+
     const person = personLimiter.check(`${clientId}:${pubkey}`)
     const budget = person.allowed ? appLimiter.check(clientId) : person
     if (!budget.allowed) {
@@ -81,13 +90,7 @@ export function timingRoutes(): Hono<AppEnv> {
     const dsn = timingDsnFor(clientId)
     if (!dsn) return c.json({ sent: false, reason: 'not_collected' }, 202)
 
-    const timing = rebuildTiming(body, {
-      app: clientId,
-      pubkey,
-      account: await accountKind(pubkey, delegate !== undefined),
-      userAgent: c.req.header('user-agent'),
-    })
-    if (!timing) throw badRequest('Not a timing')
+    timing.account = await accountKind(pubkey, delegate !== undefined)
 
     const log = c.get('log')
     try {

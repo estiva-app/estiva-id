@@ -16,18 +16,22 @@ import {
   type AccountKind,
   RELEASE,
   type Software,
+  dsnFor,
+  parseDsn,
   readBrowser,
   readScreen,
 } from './error-reports.js'
 
 export type OpenHow = 'new-tab' | 'reload' | 'in-app'
-export type OpenReady = 'placeholder-gone' | 'no-placeholder' | 'gave-up'
+export type OpenReady = 'placeholder-gone' | 'no-placeholder' | 'gave-up' | 'left'
 
 const HOWS: ReadonlySet<string> = new Set<OpenHow>(['new-tab', 'reload', 'in-app'])
 const READIES: ReadonlySet<string> = new Set<OpenReady>([
   'placeholder-gone',
   'no-placeholder',
   'gave-up',
+  // The person left a page still loading: counted apart (Miky, 19 Nov).
+  'left',
 ])
 
 /** The browser gives up at a minute; anything longer is not one of ours. */
@@ -80,11 +84,7 @@ export function rebuildTiming(
  * place for them too.
  */
 export function timingDsnFor(clientId: string): string | undefined {
-  for (const pair of config().TIMINGS_DSNS) {
-    const at = pair.indexOf('=')
-    if (at > 0 && pair.slice(0, at) === clientId) return pair.slice(at + 1)
-  }
-  return undefined
+  return dsnFor(config().TIMINGS_DSNS, clientId)
 }
 
 /** The Sentry transaction: exactly the timing's fields, and no request, IP address or extra. */
@@ -92,7 +92,9 @@ export function sentryTransaction(timing: PageTiming, eventId: string, now: numb
   return {
     event_id: eventId,
     type: 'transaction',
-    platform: 'javascript',
+    // Not `javascript`: Sentry fills a javascript event's missing IP address
+    // from whoever sent it, and this server's address is not one to keep either.
+    platform: 'other',
     transaction: `open ${timing.screen}`,
     transaction_info: { source: 'custom' },
     start_timestamp: (now - timing.waitMs) / 1000,
@@ -124,32 +126,21 @@ export function sentryTransaction(timing: PageTiming, eventId: string, now: numb
   }
 }
 
-function envelopeTarget(dsn: string): { url: string; publicKey: string } | undefined {
-  try {
-    const url = new URL(dsn)
-    const projectId = url.pathname.replace(/^\//, '')
-    if (url.protocol !== 'https:' || !url.username || !/^\d+$/.test(projectId)) return undefined
-    return { url: `https://${url.host}/api/${projectId}/envelope/`, publicKey: url.username }
-  } catch {
-    return undefined
-  }
-}
-
 /** Sends the timing to Sentry's envelope endpoint. Returns whether Sentry took it. */
 export async function sendTimingToSentry(
   timing: PageTiming,
   dsn: string,
   now = Date.now(),
 ): Promise<{ sent: boolean; status?: number }> {
-  const target = envelopeTarget(dsn)
+  const target = parseDsn(dsn)
   if (!target) return { sent: false }
   const eventId = randomBytes(16).toString('hex')
   const body = [
-    JSON.stringify({ event_id: eventId, sent_at: new Date(now).toISOString(), dsn }),
+    JSON.stringify({ event_id: eventId, sent_at: new Date(now).toISOString(), dsn: target.dsn }),
     JSON.stringify({ type: 'transaction' }),
     JSON.stringify(sentryTransaction(timing, eventId, now)),
   ].join('\n')
-  const response = await fetch(target.url, {
+  const response = await fetch(target.envelopeUrl, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-sentry-envelope',
