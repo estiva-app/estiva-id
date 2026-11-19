@@ -338,13 +338,18 @@ export function rebuildReport(
   }
 }
 
-/** `client_id=dsn` pairs from `SENTRY_DSNS`, read per call so a test can set it. */
-export function sentryDsnFor(clientId: string): string | undefined {
-  for (const pair of config().SENTRY_DSNS) {
+/** The DSN for an app from `client_id=dsn` pairs. */
+export function dsnFor(pairs: readonly string[], clientId: string): string | undefined {
+  for (const pair of pairs) {
     const at = pair.indexOf('=')
     if (at > 0 && pair.slice(0, at) === clientId) return pair.slice(at + 1)
   }
   return undefined
+}
+
+/** `client_id=dsn` pairs from `SENTRY_DSNS`, read per call so a test can set it. */
+export function sentryDsnFor(clientId: string): string | undefined {
+  return dsnFor(config().SENTRY_DSNS, clientId)
 }
 
 const MECHANISM: Record<ErrorReport['how'], string> = {
@@ -428,7 +433,7 @@ interface ParsedDsn {
   dsn: string
 }
 
-function parseDsn(dsn: string): ParsedDsn | undefined {
+export function parseDsn(dsn: string): ParsedDsn | undefined {
   try {
     const url = new URL(dsn)
     const projectId = url.pathname.replace(/^\//, '')
