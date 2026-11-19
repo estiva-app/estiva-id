@@ -77,6 +77,14 @@ export function createApp(): Hono<AppEnv> {
     }
   })
 
+  // The commit this server and its account UI are built from (the image's
+  // RELEASE), so a check after a deploy (`/land`, the smoke test) knows the
+  // new build is serving. Never cached, Cloudflare included.
+  app.get('/version.json', (c) => {
+    c.header('Cache-Control', 'no-store')
+    return c.json({ app: 'estiva-id', commit: process.env.RELEASE || 'unknown' })
+  })
+
   app.route('/', authRoutes())
   app.route('/', authorizeRoutes())
   app.route('/', logoutRoutes())
