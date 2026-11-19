@@ -22,6 +22,7 @@ describe('GET /version.json', () => {
   })
 
   it('says unknown when the image carries no commit', async () => {
+    Reflect.deleteProperty(process.env, 'RELEASE')
     const response = await app.request('/version.json')
     expect(await response.json()).toEqual({ app: 'estiva-id', commit: 'unknown' })
   })
