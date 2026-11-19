@@ -24,6 +24,7 @@ import { profileRoutes } from './routes/profile.js'
 import { reportRoutes } from './routes/report.js'
 import { signRoutes } from './routes/sign.js'
 import { testLoginRoutes } from './routes/test-login.js'
+import { timingRoutes } from './routes/timing.js'
 import { tokenRoutes } from './routes/tokens.js'
 import { mountUi, uiIsBuilt } from './ui.js'
 
@@ -94,6 +95,7 @@ export function createApp(): Hono<AppEnv> {
   app.route('/', testLoginRoutes())
   app.route('/', signRoutes())
   app.route('/', reportRoutes())
+  app.route('/', timingRoutes())
   app.route('/', nip44Routes())
   app.route('/', profileRoutes())
   app.route('/', avatarRoutes())

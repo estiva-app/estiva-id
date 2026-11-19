@@ -246,6 +246,15 @@ const schema = z.object({
    * reports accepted and dropped, so an app can ship its reporter first.
    */
   SENTRY_DSNS: commaSeparated,
+  /**
+   * Where each app's page-open timings go (`POST /timing`): `client_id=dsn`
+   * pairs, as `SENTRY_DSNS`, and kept apart from it on purpose: a deployment
+   * that wants crash reports gets no named log of its people's opens until it
+   * names a place for them here. An app with no entry has its timings accepted
+   * and dropped.
+   * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/page-open-timings-go-to-sentry-named-by-the-person-built-from-an-allowed-list.md
+   */
+  TIMINGS_DSNS: commaSeparated,
 })
 
 export type Config = z.infer<typeof schema>
