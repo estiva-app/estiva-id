@@ -34,7 +34,7 @@ import {
 import { verifyToken } from '../../domain/jwt.js'
 import { getActivePubkey } from '../../domain/keys.js'
 import { SESSION_COOKIE, peekSession } from '../../domain/sessions.js'
-import { badRequest, rateLimited, unauthenticated } from '../../errors.js'
+import { badRequest, forbidden, rateLimited, unauthenticated } from '../../errors.js'
 import type { AppEnv } from '../app.js'
 import { bearerToken } from '../bearer.js'
 import { allowOrigin, preflight } from '../cors.js'
@@ -221,5 +221,28 @@ export function reportRoutes(): Hono<AppEnv> {
     }
   })
 
+  /**
+   * The known test request for the server's own reports (PROD-6): a QA
+   * account's sign-in makes a server error on purpose, through the same error
+   * handler as any other. Anyone else is refused, and a refusal is never
+   * reported, so a stranger cannot use it to fill Sentry.
+   */
+  routes.post('/report/server-error-on-purpose', async (c) => {
+    const { pubkey, delegated } = await whoSends(c)
+    if (!pubkey) throw unauthenticated('Sign in as a QA account')
+    const account = await accountKind(pubkey, delegated)
+    if (account !== 'qa') throw forbidden('Only a QA account can make a server error on purpose')
+    c.set('reportAs', { pubkey, account })
+    makeServerErrorOnPurpose()
+  })
+
   return routes
+}
+
+class ServerErrorOnPurpose extends Error {
+  override name = 'ServerErrorOnPurpose'
+}
+
+function makeServerErrorOnPurpose(): never {
+  throw new ServerErrorOnPurpose('A server error made on purpose by a QA account')
 }

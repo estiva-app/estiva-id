@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { query } from '../db/pool.js'
+import { type ServerErrorContext, reportServerError, signedInAs } from '../domain/server-errors.js'
 import type { Session } from '../domain/sessions.js'
 import { AppError, toErrorBody } from '../errors.js'
 import { type Logger, logger } from '../logger.js'
@@ -32,6 +33,8 @@ export interface AppEnv {
     log: Logger
     /** Set by `requireSession`. Absent on unauthenticated routes. */
     session: Session
+    /** Who a server error's report names, set by a route that has proven it (PROD-6). */
+    reportAs: ServerErrorContext['as']
   }
 }
 
@@ -108,6 +111,19 @@ export function createApp(): Hono<AppEnv> {
       return c.json(toErrorBody(error), error.status as 400)
     }
     c.get('log')?.error({ err: error }, 'unhandled error')
+    // Not awaited: the caller's answer never waits on Sentry.
+    const session = c.get('session')
+    void reportServerError(
+      error,
+      {
+        how: 'error',
+        route: `${c.req.method} ${c.req.routePath}`,
+        as:
+          c.get('reportAs') ??
+          (session ? () => signedInAs(session.userId, session.delegate !== undefined) : undefined),
+      },
+      c.get('log') ?? logger,
+    )
     return c.json(toErrorBody(new AppError('internal', 'Internal server error')), 500)
   })
 
