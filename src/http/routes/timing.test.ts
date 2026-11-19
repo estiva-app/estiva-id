@@ -203,6 +203,19 @@ describe('POST /timing', () => {
     expect(sentry).toHaveBeenCalledTimes(300)
   })
 
+  it('stops an app at 1,000 timings an hour across everyone, so Sentry’s month cannot be used up', async () => {
+    const tokens: string[] = []
+    for (let i = 0; i < 4; i++) {
+      const user = await createUserWithKey({ email: `many-${i}@example.test` })
+      tokens.push((await issueToken({ pubkey: user.pubkey, clientId: 'estiva-ship' })).token)
+    }
+    for (const token of tokens)
+      for (let i = 0; i < 250; i++) expect((await send(token, timing())).status).toBe(202)
+    const ada = await send(personToken, timing())
+    expect(ada.status).toBe(429)
+    expect(sentry).toHaveBeenCalledTimes(1000)
+  })
+
   it('counts timings apart from error reports, so a day of opens never crowds out a crash', async () => {
     for (let i = 0; i < 300; i++) await send(personToken, timing())
     expect((await send(personToken, timing())).status).toBe(429)
