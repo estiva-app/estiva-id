@@ -54,6 +54,15 @@ function kind(name: string) {
 }
 
 describe('reportServerError', () => {
+  it('sends an error from outside our own code, repeated in a loop, three times, not up to the hourly cap', async () => {
+    for (let i = 0; i < 20; i++) {
+      const error = new Error('socket hang up')
+      error.stack = 'Error: socket hang up\n    at Socket.onend (node:_http_client:1:1)'
+      await reportServerError(error, { how: 'error' }, logger)
+    }
+    expect(sentry).toHaveBeenCalledTimes(3)
+  })
+
   it('sends the same error made 1,000 times in a minute three times, not 1,000', async () => {
     const error = new TypeError('Cannot read properties of undefined')
     for (let i = 0; i < 1_000; i++) {
