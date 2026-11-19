@@ -67,9 +67,10 @@ export function rebuildTiming(
   if (typeof waitMs !== 'number' || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > MAX_WAIT_MS)
     return undefined
   // Optional: a picture number that is not one of ours is left out, and the wait still counts.
+  // The saved picture shows before the live page, so never after the wait.
   const { pictureMs } = input
   const picture =
-    typeof pictureMs === 'number' && Number.isInteger(pictureMs) && pictureMs >= 0 && pictureMs <= MAX_WAIT_MS
+    typeof pictureMs === 'number' && Number.isInteger(pictureMs) && pictureMs >= 0 && pictureMs <= waitMs
       ? { pictureMs }
       : {}
   return {

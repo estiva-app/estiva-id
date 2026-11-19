@@ -138,7 +138,7 @@ describe('POST /timing', () => {
   })
 
   it('leaves out a picture number that is not one of ours, and still sends the wait', async () => {
-    for (const pictureMs of [-1, 1.5, 3_600_000, '180', { value: 'plantedtitle' }]) {
+    for (const pictureMs of [-1, 1.5, 2401, 3_600_000, '180', { value: 'plantedtitle' }]) {
       sentry.mockClear()
       expect((await send(personToken, { ...timing(), pictureMs })).status).toBe(202)
       const event = sentEvent()
