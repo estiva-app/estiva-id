@@ -70,7 +70,10 @@ export function rebuildTiming(
   // The saved picture shows before the live page, so never after the wait.
   const { pictureMs } = input
   const picture =
-    typeof pictureMs === 'number' && Number.isInteger(pictureMs) && pictureMs >= 0 && pictureMs <= waitMs
+    typeof pictureMs === 'number' &&
+    Number.isInteger(pictureMs) &&
+    pictureMs >= 0 &&
+    pictureMs <= waitMs
       ? { pictureMs }
       : {}
   return {
