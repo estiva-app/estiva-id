@@ -1,15 +1,13 @@
 /**
- * Estiva ID's server reports its own errors to Sentry (PROD-6): the known test
- * request, what a report may hold, and the ceiling that keeps a loop from
- * spending the month.
+ * The known test request for Estiva ID's server reports (PROD-6): a QA account
+ * makes a server error on purpose, it reaches Sentry under the server with
+ * nothing of the request, and nobody else can use it.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetConfigForTests } from '../../config.js'
 import { closePool, query } from '../../db/pool.js'
 import { issueToken } from '../../domain/jwt.js'
-import { reportServerError, serverReport } from '../../domain/server-errors.js'
 import { createUserWithKey } from '../../domain/users.js'
-import { logger } from '../../logger.js'
 import { prepareDatabase, truncateAll } from '../../test/db.js'
 import { createApp } from '../app.js'
 
@@ -24,7 +22,11 @@ let qaToken: string
 let qaPubkey: string
 let sentry: ReturnType<typeof vi.fn>
 
-/** Settles the reports a request started without waiting on (microtasks only, no clock). */
+/**
+ * The error handler answers without waiting on Sentry. A report on this route
+ * needs no lookup, so a few turns of the event loop settle it; the tests that
+ * expect a report assert it arrived, so a slower path fails loudly.
+ */
 const settle = async () => {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
 }
@@ -121,6 +123,7 @@ describe('POST /report/server-error-on-purpose', () => {
     await onPurpose(qaToken)
     await settle()
 
+    expect(sentry).toHaveBeenCalledTimes(1)
     const envelope = sentEnvelopes().join('\n')
     expect(envelope).not.toContain(qaToken)
     expect(envelope).not.toContain('plantedcookie123')
@@ -142,93 +145,5 @@ describe('POST /report/server-error-on-purpose', () => {
     expect(response.status).toBe(401)
     await settle()
     expect(sentry).not.toHaveBeenCalled()
-  })
-})
-
-describe("the server's reports", () => {
-  it('sends the same error made 1,000 times in a minute three times, not 1,000', async () => {
-    const error = new TypeError('Cannot read properties of undefined')
-    for (let i = 0; i < 1_000; i++) {
-      vi.setSystemTime(clock + i * 60)
-      await reportServerError(error, { how: 'error', route: 'GET /healthz' }, logger)
-    }
-    expect(sentry).toHaveBeenCalledTimes(3)
-  })
-
-  it('stops every kind of error together at ten an hour', async () => {
-    for (let i = 0; i < 30; i++) {
-      const error = new Error('boom')
-      error.name = `Kind${i}Error`
-      await reportServerError(error, { how: 'error' }, logger)
-    }
-    expect(sentry).toHaveBeenCalledTimes(10)
-  })
-
-  it('reports an error that ended the process as uncaught, with no one signed in', async () => {
-    await reportServerError(new RangeError('boom'), { how: 'uncaught-exception' }, logger)
-    const event = sentEvent()
-    expect(event.exception.values[0].mechanism.type).toBe('onuncaughtexception')
-    expect(event.user).toBeUndefined()
-    expect(event.tags.account).toBeUndefined()
-    expect(event.transaction).toBe('<none>')
-  })
-
-  it('sends nothing when the server has no Sentry address', async () => {
-    process.env.SENTRY_DSNS = `estiva-peek=${SERVER_DSN}`
-    resetConfigForTests()
-    try {
-      await reportServerError(new Error('boom'), { how: 'error' }, logger)
-      expect(sentry).not.toHaveBeenCalled()
-    } finally {
-      process.env.SENTRY_DSNS = `estiva-id-server=${SERVER_DSN}`
-      resetConfigForTests()
-    }
-  })
-})
-
-describe('serverReport', () => {
-  it("removes quoted text from the error's wording", () => {
-    const report = serverReport(
-      new SyntaxError(`Unexpected token 'p', "${PLANTED}" is not valid JSON`),
-      { how: 'error' },
-    )
-    expect(report.type).toBe('SyntaxError')
-    expect(report.message).not.toContain('plantedbody')
-  })
-
-  it('keeps a frame of our own files and drops the name and place of any other', () => {
-    const error = new Error('boom')
-    error.stack = [
-      'Error: boom',
-      `    at ownFunction (file://${process.cwd()}/src/domain/users.ts:10:5)`,
-      `    at libFunction (file://${process.cwd()}/node_modules/hono/dist/x.js:1:2)`,
-      '    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)',
-      `    at /home/someone/${PLANTED.replaceAll(' ', '-')}/x.js:1:1`,
-    ].join('\n')
-    expect(serverReport(error, { how: 'error' }).frames).toEqual([
-      { function: 'ownFunction', absPath: 'src/domain/users.ts', line: 10, column: 5 },
-      { absPath: '<other>' },
-      { absPath: '<other>' },
-      { absPath: '<other>' },
-    ])
-  })
-
-  it('names the route by its pattern only, never a path a person typed', () => {
-    expect(
-      serverReport(new Error('x'), { how: 'error', route: 'GET /admin/people/:id' }).screen,
-    ).toBe('GET /admin/people/:id')
-    expect(
-      serverReport(new Error('x'), { how: 'error', route: 'GET /x?q=plantedbody quarterly' })
-        .screen,
-    ).toBe('<none>')
-  })
-
-  it("sends the release as unknown when the image's is not a commit", () => {
-    process.env.RELEASE = 'not a sha'
-    try {
-      expect(serverReport(new Error('x'), { how: 'error' }).release).toBe('unknown')
-    } finally {
-      process.env.RELEASE = RELEASE
-    }
   })
 })

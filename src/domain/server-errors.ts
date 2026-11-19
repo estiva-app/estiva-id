@@ -136,26 +136,37 @@ export async function signedInAs(
   return pubkey ? { pubkey, account: await accountKind(pubkey, delegated) } : undefined
 }
 
+/** A lookup of who was signed in waits this long at most: the fault may be the database itself. */
+const LOOKUP_MS = 1_000
+
 /**
  * Sends the report, if the ceilings allow and a DSN is set. Never throws: a
  * report that cannot be sent is logged and dropped, and never retried.
- * `context.as` may be a promise, so a caller answering a request need not wait.
+ * `context.as` may be a lookup, run only once the ceilings let the report
+ * through, so a flood of errors never becomes a flood of queries.
  */
 export async function reportServerError(
   error: unknown,
   context: Omit<ServerErrorContext, 'as'> & {
-    as?: ServerErrorContext['as'] | Promise<ServerErrorContext['as']>
+    as?: ServerErrorContext['as'] | (() => Promise<ServerErrorContext['as']>)
   },
   log: Logger,
 ): Promise<void> {
-  // Caught first, so a failed lookup never becomes an unhandled rejection of its own.
-  const signedIn = Promise.resolve(context.as).catch(() => undefined)
   try {
     const dsn = sentryDsnFor(ESTIVA_ID_SERVER)
     if (!dsn) return
-    const as = await signedIn
-    const report = serverReport(error, { ...context, as })
+    const { as: who, ...rest } = context
+    let report = serverReport(error, { ...rest, ...(typeof who === 'object' ? { as: who } : {}) })
     if (!spend(report)) return
+    if (typeof who === 'function') {
+      const as = await Promise.race([
+        who().catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          setTimeout(() => resolve(undefined), LOOKUP_MS).unref()
+        }),
+      ])
+      if (as) report = { ...report, pubkey: as.pubkey, account: as.account }
+    }
     const result = await sendToSentry(report, dsn)
     if (!result.sent) log.warn({ status: result.status }, 'sentry refused a server report')
   } catch (failure) {

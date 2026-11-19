@@ -120,7 +120,7 @@ export function createApp(): Hono<AppEnv> {
         route: `${c.req.method} ${c.req.routePath}`,
         as:
           c.get('reportAs') ??
-          (session ? signedInAs(session.userId, session.delegate !== undefined) : undefined),
+          (session ? () => signedInAs(session.userId, session.delegate !== undefined) : undefined),
       },
       c.get('log') ?? logger,
     )
