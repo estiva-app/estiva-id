@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { config } from '../config.js'
 import { closePool, query } from '../db/pool.js'
 import { createUserWithKey } from '../domain/users.js'
+import { verifyAuthTag } from '../nostr/nip-oa.js'
 import { prepareDatabase, truncateAll } from '../test/db.js'
 import {
   HandleTakenError,
@@ -167,6 +168,39 @@ describe('publishProfile', () => {
     )
     expect(roleContent).toMatchObject({ bot: true, display_name: 'Claude (steered by Ada)' })
     expect(personContent).not.toHaveProperty('bot')
+  })
+
+  /**
+   * PEE-79. An app counts an agent's messages as its owner's own, and learns the
+   * owner from the agent's profile: a NIP-OA tag that verifies, against the
+   * agent's key, to the owner's key. The workspace's own roles and people carry
+   * none.
+   */
+  it("puts the owner's signed tag on an owned agent's profile, and none on anyone else's", async () => {
+    const owned = await createUserWithKey({
+      displayName: 'Claude (steered by Ada)',
+      kind: 'role',
+      ownerUserId: ada.id,
+    })
+    const unowned = await createUserWithKey({ displayName: 'Relay Operator', kind: 'role' })
+    const calls = stubRelay({ body: { accepted: true, event_id: 'abc' } })
+
+    await publishProfile(owned.id)
+    await publishProfile(unowned.id)
+    await publishProfile(ada.id)
+
+    const events = calls.map((c) => c.body as { pubkey: string; tags: string[][] })
+    expect(events).toHaveLength(3)
+    const [owned_, unowned_, person_] = events as [
+      (typeof events)[0],
+      (typeof events)[0],
+      (typeof events)[0],
+    ]
+    const auth = owned_.tags.filter((t) => t[0] === 'auth')
+    expect(auth).toHaveLength(1)
+    expect(verifyAuthTag(auth[0], owned_.pubkey)).toBe(ada.pubkey)
+    expect(unowned_.tags).toEqual([])
+    expect(person_.tags).toEqual([])
   })
 
   /**
