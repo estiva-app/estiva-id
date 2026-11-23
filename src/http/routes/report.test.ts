@@ -206,6 +206,35 @@ describe('POST /report', () => {
     expect(event.tags).toMatchObject({ account: 'qa', failure: 'not-sent' })
   })
 
+  it('files a failure that says why as its own error, under our sentence and our words for the reason', async () => {
+    await report(qaToken, { ...crash, how: 'failure', named: 'not-loaded', reason: 'told-to-wait' })
+    const event = sentEvent()
+    expect(event.exception.values[0].value).toBe('Could not load — the relay said wait')
+    // Apart from the same failure with another reason, and from one that says none.
+    expect(event.fingerprint).toEqual(['failure', 'not-loaded', 'told-to-wait'])
+    expect(event.tags).toMatchObject({ failure: 'not-loaded', reason: 'told-to-wait' })
+  })
+
+  it('drops a reason outside the list, such as the relay’s own sentence, and files the failure as one that named none', async () => {
+    await report(personToken, {
+      ...crash,
+      how: 'failure',
+      named: 'not-loaded',
+      reason: `restricted: ${PLANTED_TITLE}`,
+    })
+    const event = sentEvent()
+    expect(event.exception.values[0].value).toBe('Could not load')
+    expect(event.fingerprint).toEqual(['failure', 'not-loaded'])
+    expect(event.tags).not.toHaveProperty('reason')
+    expect(sentEnvelopes()[0]).not.toContain('plantedtitle')
+  })
+
+  it('never puts a reason on a refused write or a crash, whatever the app sent', async () => {
+    await report(qaToken, { ...crash, how: 'refused', named: 'archived', reason: 'told-to-wait' })
+    await report(qaToken, { ...crash, reason: 'told-to-wait' })
+    for (const envelope of sentEnvelopes()) expect(envelope).not.toContain('told-to-wait')
+  })
+
   it('sends a failure named outside the list as unnamed', async () => {
     await report(personToken, { ...crash, how: 'failure', named: PLANTED_TITLE })
     const event = sentEvent()

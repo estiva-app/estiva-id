@@ -55,6 +55,8 @@ export interface ErrorReport {
   how: 'error' | 'unhandled-rejection' | 'uncaught-exception' | 'boundary' | 'failure' | 'refused'
   /** A failure's name from {@link FAILURES}, or a refusal's code; only on those two. */
   named?: string
+  /** Why a failure happened, from {@link FAILURE_REASONS}; only on a failure, absent when the app heard none. */
+  reason?: string
   type: string
   message: string
   frames: ReportFrame[]
@@ -171,6 +173,26 @@ const FAILURES: ReadonlyMap<string, string> = new Map([
 ])
 
 /**
+ * Why a failure happened, with the words Sentry shows after the failure's own
+ * ("Could not load — the relay said wait"). `@estiva-app/platform`'s
+ * `FAILURE_REASONS` is the same list; a reason not here is dropped, and the
+ * failure is then filed as one that named none. Each reason of a failure is
+ * its own error in Sentry: 23 Nov, nine "Could not load" reports after the
+ * per-minute fixes sat in one error and none was the limit.
+ *
+ * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/error-reports-go-to-hosted-sentry-built-from-an-allowed-list.md
+ */
+const FAILURE_REASONS: ReadonlyMap<string, string> = new Map([
+  ['told-to-wait', 'the relay said wait'],
+  ['id-told-to-wait', 'Estiva ID said wait'],
+  ['relay-busy', 'the relay was busy'],
+  ['signed-out', 'the sign-in had ended'],
+  ['not-reached', 'the server was not reached'],
+  ['no-access', 'the relay refused the read'],
+  ['other', 'another reason'],
+])
+
+/**
  * A refused write's code, as the relay client reads it (`archived`, `busy`,
  * `blocked`, `http-500`); anything else is `uncoded`. Never the relay's sentence.
  * why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/a-refusal-starts-with-a-reason-code-every-app-reads.md
@@ -275,10 +297,18 @@ const HOW = new Set<ErrorReport['how']>([
 ])
 
 /** A failure or a refusal carries its name and nothing else: no wording, no frames. */
-function readHandled(how: 'failure' | 'refused', named: unknown) {
+function readHandled(how: 'failure' | 'refused', named: unknown, why?: unknown) {
   if (how === 'failure') {
     const name = typeof named === 'string' && FAILURES.has(named) ? named : 'unnamed'
-    return { named: name, type: 'Failure', message: FAILURES.get(name) as string }
+    // A failure's reason is one of ours or nothing: never a refusal's, never the app's wording.
+    const reason = typeof why === 'string' && FAILURE_REASONS.has(why) ? why : undefined
+    const sentence = FAILURES.get(name) as string
+    return {
+      named: name,
+      ...(reason ? { reason } : {}),
+      type: 'Failure',
+      message: reason ? `${sentence} — ${FAILURE_REASONS.get(reason) as string}` : sentence,
+    }
   }
   const code = typeof named === 'string' && CODE.test(named) ? named : 'uncoded'
   return { named: code, type: 'WriteRefused', message: code }
@@ -316,7 +346,8 @@ export function rebuildReport(
     .filter((step): step is ReportStep => step !== undefined)
 
   const how = HOW.has(input.how as ErrorReport['how']) ? (input.how as ErrorReport['how']) : 'error'
-  const handled = how === 'failure' || how === 'refused' ? readHandled(how, input.named) : undefined
+  const handled =
+    how === 'failure' || how === 'refused' ? readHandled(how, input.named, input.reason) : undefined
 
   return {
     app: known.app,
@@ -324,7 +355,13 @@ export function rebuildReport(
       typeof input.release === 'string' && RELEASE.test(input.release) ? input.release : 'unknown',
     how,
     ...(handled
-      ? { named: handled.named, type: handled.type, message: handled.message, frames: [] }
+      ? {
+          named: handled.named,
+          ...('reason' in handled && handled.reason ? { reason: handled.reason } : {}),
+          type: handled.type,
+          message: handled.message,
+          frames: [],
+        }
       : {
           type: typeof error.type === 'string' && TYPE.test(error.type) ? error.type : 'Error',
           message: scrubMessage(error.message),
@@ -367,7 +404,9 @@ const software = (s: Software) => ({ name: s.name, ...(s.version ? { version: s.
  * The Sentry event: exactly the report's fields, and no request, IP address or
  * extra. A failure or a refusal is grouped by its name (one issue per app for
  * each code, so expected refusals such as `not-member` stay in their own row),
- * an `unnamed` failure by its screen too, and is marked handled.
+ * an `unnamed` failure by its screen too, and is marked handled. A failure
+ * that says why is grouped by its reason as well; one that says none keeps
+ * the grouping it had, so an older tab's reports stay where they were.
  */
 export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
   const handled = report.how === 'failure' || report.how === 'refused'
@@ -375,6 +414,7 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
     report.how,
     report.named ?? '',
     ...(report.named === 'unnamed' ? [report.screen] : []),
+    ...(report.reason ? [report.reason] : []),
   ]
   return {
     event_id: eventId,
@@ -411,6 +451,7 @@ export function sentryEvent(report: ErrorReport, eventId: string, now: number) {
       ...(report.account ? { account: report.account } : {}),
       screen: report.screen,
       ...(report.how === 'failure' ? { failure: report.named } : {}),
+      ...(report.reason ? { reason: report.reason } : {}),
       ...(report.how === 'refused' ? { code: report.named } : {}),
     },
     contexts: {
