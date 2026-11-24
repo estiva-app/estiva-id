@@ -217,6 +217,9 @@ describe('seeded signing policies', () => {
         BUZZ.NAMED_FIRST_RECORD,
         // The mute list Join takes a topic off, as in Ship and Peek (TOPI-4).
         30078,
+        // Ship's project and issue, made from Leaf's ⌘K by Ship's declared actions, as Peek makes them (KIN-11).
+        SHIP.PROJECT,
+        SHIP.ISSUE,
       ].sort((a, b) => a - b),
     )
     // Never the Folder's state, which the relay signs, and never a topic: a

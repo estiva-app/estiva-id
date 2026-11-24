@@ -462,6 +462,12 @@ export const SEED_APPS: readonly SeedApp[] = [
       9101,
       7,
       30078,
+      // 30850 and 30851 are Ship's project and issue: Leaf's ⌘K makes them in Leaf by following the add-project and
+      // add-issue actions Ship's manifest declares, as Peek's does, so the person stays on their page (KIN-11; Miky, at
+      // its kickoff, 24 November). The 1852 that lists a new project and the 1851 that carries an issue's text are above.
+      // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-app-makes-another-apps-file-in-place-from-its-declared-action.md
+      30850,
+      30851,
       ...EVERY_INSTALLED_APP,
     ],
     nip98UrlPrefixes: [],
