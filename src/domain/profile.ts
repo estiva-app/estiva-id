@@ -19,6 +19,7 @@ import { logger } from '../logger.js'
 import { type ProfileFields, buildProfile } from '../nostr/event.js'
 import { signEvent } from '../nostr/keys.js'
 import { publishEvent, relayBridgeUrl } from '../nostr/relay.js'
+import { ownerAttestation } from './attestation.js'
 import { recordAudit } from './audit.js'
 import { avatarDisplayUrl } from './avatar-url.js'
 import { withUserSecretKey } from './keys.js'
@@ -216,10 +217,19 @@ export async function publishProfile(
     bot: profile.isBot || undefined,
   }
 
+  /*
+    Whose agent this is, as its owner's NIP-OA tag (PEE-79): an app checks the
+    signature against this key and counts the agent's messages as the owner's
+    own. Only on a role with an owner — the workspace's own roles and people
+    carry none, so their events are unchanged. `ownerAttestation` never throws.
+    why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-agents-profile-says-whose-it-is.md
+  */
+  const ownerTag = profile.isBot ? await ownerAttestation(userId) : undefined
+
   try {
     const result = await withUserSecretKey(userId, async (secretKey, pubkey) => {
       const event = signEvent(
-        buildProfile(pubkey, Math.floor(Date.now() / 1000), fields),
+        buildProfile(pubkey, Math.floor(Date.now() / 1000), fields, ownerTag ? [ownerTag] : []),
         secretKey,
       )
       return { pubkey, ...(await publishEvent(event, secretKey)) }
