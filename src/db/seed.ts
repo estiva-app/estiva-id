@@ -256,11 +256,19 @@ export const SEED_APPS: readonly SeedApp[] = [
     // (Miky, 2026-11-02). Peek only for now: it is the app that draws a team's
     // people; Ship and Leaf only rename Folder to Team.
     // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/anyone-may-join-an-open-team-and-only-its-members-add-or-mark.md
+    //
+    // **30842 — Leaf's document (KIN-9).** Peek's ⌘K makes a document in the
+    // team you are in by following the New document Leaf's manifest declares,
+    // as it makes Ship's issues and projects, so you stay in the conversation
+    // (Miky, at KIN-9's kickoff, 27 November). Its text goes out as a 1851 and
+    // its listing as a 1852, both above.
+    // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-app-makes-another-apps-file-in-place-from-its-declared-action.md
     allowedKinds: [
       9,
       7,
       5,
       9007,
+      30842,
       9021,
       9022,
       9000,
@@ -383,10 +391,17 @@ export const SEED_APPS: readonly SeedApp[] = [
     // 9101 resolves or reopens a comment's thread, the same assertion Peek and
     // Leaf write, so one Resolve works in every app (ONE-8; record
     // anyone-who-may-comment-resolves-or-reopens-a-thread-and-the-newest-counts).
+    //
+    // 30842 is Leaf's document: Ship's ⌘K makes one in the team of the issue or
+    // project you are on, by following Leaf's declared New document, and the
+    // page stays (KIN-9; Miky, at its kickoff, 27 November). Its text is a 1851
+    // and its listing a 1852, both here already.
+    // why: https://github.com/estiva-app/estiva-docs/blob/main/decisions/an-app-makes-another-apps-file-in-place-from-its-declared-action.md
     allowedKinds: [
       9101,
       30850,
       30851,
+      30842,
       1851,
       9,
       5,
