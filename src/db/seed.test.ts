@@ -138,7 +138,8 @@ describe('seeded signing policies', () => {
     // The document, its text as its first change, and the team command that lists it: a ceiling missing any of the
     // three refuses at /sign after the form has been filled.
     for (const client of ['estiva-peek', 'estiva-ship']) {
-      for (const kind of [BUZZ.DOCUMENT, SHIP.CHANGE, BUZZ.FOLDER_COMMAND]) expect(app(client).allowedKinds).toContain(kind)
+      for (const kind of [BUZZ.DOCUMENT, SHIP.CHANGE, BUZZ.FOLDER_COMMAND])
+        expect(app(client).allowedKinds).toContain(kind)
     }
   })
 
