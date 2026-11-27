@@ -134,6 +134,14 @@ describe('seeded signing policies', () => {
     expect(app('estiva-peek').allowedKinds).toContain(SHIP.PROJECT)
   })
 
+  it("lets Peek and Ship sign Leaf's document and what follows it, which their ⌘K makes from Leaf's New document (KIN-9)", () => {
+    // The document, its text as its first change, and the team command that lists it: a ceiling missing any of the
+    // three refuses at /sign after the form has been filled.
+    for (const client of ['estiva-peek', 'estiva-ship']) {
+      for (const kind of [BUZZ.DOCUMENT, SHIP.CHANGE, BUZZ.FOLDER_COMMAND]) expect(app(client).allowedKinds).toContain(kind)
+    }
+  })
+
   it('lets both apps sign the read-state kind', () => {
     // Read state is a property of the person, not the app (CRO-2, ADR 0001
     // layer 2), so both write it and neither owns it. Granting one would make
